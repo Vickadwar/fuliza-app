@@ -34,3 +34,42 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+
+
+
+# FulizaBoost - M-Pesa Limit Upgrade Application
+
+A modern, mobile-first web application for upgrading M-Pesa Fuliza limits with instant activation.
+
+## Features
+
+- 🚀 **Modern UI**: Clean, sleek design with mobile-first approach
+- 📱 **Responsive**: Works perfectly on all devices
+- 💳 **M-Pesa Integration**: STK Push payment processing
+- 🔒 **Secure**: Bank-level security and encryption
+- ⚡ **Fast**: Instant limit activation
+
+## Tech Stack
+
+- **Next.js 16** - React framework with App Router
+- **TypeScript** - Type safety
+- **Tailwind CSS** - Styling
+- **Supabase** - Backend & Database
+- **Vercel** - Hosting & Deployment
+
+## Getting Started
+
+### Prerequisites
+- Node.js 18+ 
+- npm or yarn
+- Git
+
+### Installation
+
+1. Clone the repository:
+```bash
+git clone https://github.com/Vickadwar/fuliza-app.git
+cd fuliza-app
+
+

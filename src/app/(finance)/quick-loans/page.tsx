@@ -1,38 +1,45 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import React, { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { 
   ArrowLeft, 
   Banknote, 
-  ChevronRight, 
   ShieldCheck, 
-  Calculator,
   Wallet,
-  Clock,
+  Smartphone,
   CheckCircle2,
   AlertCircle,
   Loader2,
   Lock,
-  Smartphone,
-  ArrowRight,
-  TrendingUp,
-  Zap,
-  Calendar,
   Info
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
-export default function QuickLoansPage() {
+function QuickLoansContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   
-  // Steps: 'calculator' -> 'form' -> 'fee_payment' -> 'success'
   const [step, setStep] = useState<'calculator' | 'form' | 'fee_payment' | 'success'>('calculator')
 
   // Calculator State
   const [amount, setAmount] = useState(15000)
   const [months, setMonths] = useState(1)
   
+  // Set initial amount from URL only once on mount
+  useEffect(() => {
+    const paramAmount = searchParams.get('amount')
+    if (paramAmount) {
+        const parsed = Number(paramAmount.replace(/,/g, ''))
+        if (!isNaN(parsed)) {
+            // FIX: Enforce min 500, max 50000
+            const clamped = Math.max(500, Math.min(parsed, 50000))
+            setAmount(clamped)
+        }
+    }
+  }, [searchParams])
+
   // Derived Financial State
   const [processingFee, setProcessingFee] = useState(0)
   const [totalRepayable, setTotalRepayable] = useState(0)
@@ -42,80 +49,38 @@ export default function QuickLoansPage() {
   const [formData, setFormData] = useState({ phone: '', idNumber: '', purpose: '' })
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // --- LOGIC: Fees & Interest ---
+  // Logic
   useEffect(() => {
-    // 1. Calculate Interest (Increases with duration)
     const newRate = 12 + ((months - 1) * 2.5) 
     setInterestRate(Math.round(newRate))
 
-    // 2. Calculate Processing Fee (e.g., 2.5% of loan amount, min 150)
     const calculatedFee = Math.max(150, Math.ceil((amount * 0.025) / 10) * 10)
     setProcessingFee(calculatedFee)
 
-    // 3. Total Repayment
     const total = amount + (amount * (newRate / 100))
     setTotalRepayable(Math.ceil(total / 10) * 10)
   }, [amount, months])
 
-  // --- HANDLERS ---
   const handleFeePayment = () => {
     setIsSubmitting(true)
-    // Simulate STK Push delay
     setTimeout(() => {
         setIsSubmitting(false)
         setStep('fee_payment')
-        
-        // Simulate Success after payment
         setTimeout(() => {
             setStep('success')
         }, 6000)
     }, 1500)
   }
 
+  // Helper to handle slider change ensuring min 500
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let val = Number(e.target.value)
+    if (val < 500) val = 500
+    setAmount(val)
+  }
+
   return (
-    <div className="min-h-screen bg-white font-sans text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
-      
-      {/* --- Status Bar --- */}
-      <div className="bg-indigo-950 text-white text-xs py-2 px-3 relative z-50">
-        <div className="flex justify-between items-center max-w-7xl mx-auto">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="font-bold tracking-wide text-indigo-100">INSTANT DISBURSEMENT ACTIVE</span>
-          </div>
-        </div>
-      </div>
-
-      {/* --- Header --- */}
-      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-100">
-        <div className="container mx-auto px-4 h-16 md:h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-             {step !== 'calculator' && (
-                <button 
-                    onClick={() => setStep('calculator')} 
-                    className="h-10 w-10 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center transition-colors"
-                >
-                    <ArrowLeft className="w-5 h-5 text-slate-700"/>
-                </button>
-             )}
-             <div className="h-10 w-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
-               <Banknote className="text-white h-6 w-6" />
-             </div>
-             <div>
-                <span className="text-xl font-black tracking-tight text-slate-900 block leading-none">QuickCash</span>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Instant Loan</span>
-             </div>
-          </div>
-        </div>
-      </header>
-
       <main className="max-w-2xl mx-auto px-4 py-8 pb-24">
-
-        {/* ==========================================
-            VIEW 1: LOAN CALCULATOR
-           ========================================== */}
         {step === 'calculator' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8">
                 
@@ -126,10 +91,8 @@ export default function QuickLoansPage() {
                     <p className="text-slate-500 font-medium">Funds sent directly to M-Pesa.</p>
                 </div>
 
-                {/* --- CALCULATOR CARD --- */}
+                {/* --- CALCULATOR --- */}
                 <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-slate-200/60 border border-slate-100 overflow-hidden relative">
-                    
-                    {/* Amount Display (Credit Card Style) */}
                     <div className="bg-slate-900 p-8 text-center text-white relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-40 h-40 bg-white opacity-5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
                         <div className="absolute bottom-0 left-0 w-32 h-32 bg-emerald-500 opacity-10 rounded-full translate-y-1/2 -translate-x-1/2 blur-2xl"></div>
@@ -144,26 +107,23 @@ export default function QuickLoansPage() {
                     </div>
 
                     <div className="p-8 space-y-8">
-                        
-                        {/* 1. Amount Slider */}
                         <div className="space-y-4">
                             <div className="flex justify-between text-xs font-bold text-slate-400 uppercase tracking-wide">
-                                <span>1k</span>
+                                <span>500</span> {/* FIX: Min Label 500 */}
                                 <span className="text-emerald-500">Slide amount</span>
                                 <span>50k</span>
                             </div>
                             <input 
                                 type="range" 
-                                min="1000" 
+                                min="500" // FIX: Min 500
                                 max="50000" 
                                 step="500" 
                                 value={amount}
-                                onChange={(e) => setAmount(Number(e.target.value))}
+                                onChange={handleAmountChange}
                                 className="w-full h-4 bg-slate-100 rounded-full appearance-none cursor-pointer accent-emerald-500 hover:accent-emerald-400 transition-all"
                             />
                         </div>
 
-                        {/* 2. Duration Selector */}
                         <div className="space-y-4">
                              <div className="flex justify-between items-center">
                                  <label className="text-sm font-bold text-slate-900 uppercase">Duration</label>
@@ -185,7 +145,6 @@ export default function QuickLoansPage() {
                              </div>
                         </div>
 
-                        {/* 3. Live Summary Box */}
                         <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 space-y-4">
                             <div className="flex justify-between text-sm">
                                 <span className="font-medium text-slate-500">Interest ({interestRate}%)</span>
@@ -213,11 +172,9 @@ export default function QuickLoansPage() {
                         >
                             Get KES {amount.toLocaleString()} Now
                         </Button>
-
                     </div>
                 </div>
                 
-                {/* Trust Signals */}
                 <div className="flex items-center justify-center gap-2 text-xs font-bold text-slate-400 bg-white py-3 px-4 rounded-full shadow-sm border border-slate-100 w-fit mx-auto">
                     <ShieldCheck className="w-4 h-4 text-emerald-500"/>
                     <span>No guarantors required • Instant M-Pesa transfer</span>
@@ -225,15 +182,9 @@ export default function QuickLoansPage() {
             </div>
         )}
 
-        {/* ==========================================
-            VIEW 2: APPLICATION FORM
-           ========================================== */}
         {step === 'form' && (
             <div className="animate-in slide-in-from-right duration-500 max-w-md mx-auto space-y-6">
-                
                 <div className="bg-white rounded-[2rem] shadow-xl border border-slate-100 overflow-hidden">
-                    
-                    {/* Ticket Header */}
                     <div className="bg-emerald-500 p-8 text-white relative overflow-hidden">
                          <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl"></div>
                         <div className="flex justify-between items-start relative z-10">
@@ -270,7 +221,6 @@ export default function QuickLoansPage() {
                             />
                         </div>
 
-                        {/* Fee Warning Card */}
                         <div className="bg-blue-50 rounded-2xl p-5 border border-blue-100">
                             <div className="flex items-start gap-3">
                                 <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
@@ -306,12 +256,8 @@ export default function QuickLoansPage() {
             </div>
         )}
 
-        {/* ==========================================
-            VIEW 3: FEE PAYMENT (STK PUSH)
-           ========================================== */}
         {step === 'fee_payment' && (
             <div className="text-center pt-8 animate-in zoom-in-95 duration-500 max-w-sm mx-auto">
-                
                 <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl shadow-emerald-100 border border-slate-50 relative overflow-hidden">
                     <div className="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6 relative">
                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-20"></span>
@@ -342,9 +288,6 @@ export default function QuickLoansPage() {
             </div>
         )}
 
-        {/* ==========================================
-            VIEW 4: SUCCESS / WAIT
-           ========================================== */}
         {step === 'success' && (
             <div className="text-center pt-8 animate-in zoom-in-95 duration-500 max-w-md mx-auto">
                  <div className="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -365,15 +308,13 @@ export default function QuickLoansPage() {
                                 <p className="text-xs text-slate-500 font-medium mt-1">Processing fee payment confirmed.</p>
                             </div>
                         </div>
-                        
                         <div className="w-0.5 h-6 bg-slate-100 ml-5"></div>
-                        
                         <div className="flex gap-4">
                             <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-black shrink-0">2</div>
                             <div>
                                 <h4 className="font-bold text-slate-900">Final Review</h4>
                                 <p className="text-xs text-slate-500 font-medium mt-1">
-                                    System is verifying your details. You will receive an SMS with the loan disbursement shortly.
+                                    System is verifying your details. You will receive an SMS with the loan disbursement within 24 hours.
                                 </p>
                             </div>
                         </div>
@@ -382,7 +323,7 @@ export default function QuickLoansPage() {
                     <div className="mt-8 bg-yellow-50 border border-yellow-100 p-4 rounded-xl flex gap-3">
                         <AlertCircle className="w-5 h-5 text-yellow-600 shrink-0" />
                         <p className="text-xs text-yellow-800 font-bold leading-relaxed">
-                            Funds usually arrive within 5-10 minutes.
+                            Funds usually arrive within 24-48 Hours.
                         </p>
                     </div>
                 </div>
@@ -395,8 +336,45 @@ export default function QuickLoansPage() {
                 </Button>
             </div>
         )}
-
       </main>
-    </div>
   )
+}
+
+export default function QuickLoansPage() {
+    return (
+        <div className="min-h-screen bg-white font-sans text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
+            <div className="bg-indigo-950 text-white text-xs py-2 px-3 relative z-50">
+                <div className="flex justify-between items-center max-w-7xl mx-auto">
+                    <div className="flex items-center gap-2">
+                        <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                        <span className="font-bold tracking-wide text-indigo-100">INSTANT DISBURSEMENT ACTIVE</span>
+                    </div>
+                </div>
+            </div>
+
+            <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-100">
+                <div className="container mx-auto px-4 h-16 md:h-20 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <Link href="/" className="h-10 w-10 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center transition-colors">
+                            <ArrowLeft className="w-5 h-5 text-slate-700"/>
+                        </Link>
+                        <div className="h-10 w-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                            <Banknote className="text-white h-6 w-6" />
+                        </div>
+                        <div>
+                            <span className="text-xl font-black tracking-tight text-slate-900 block leading-none">QuickCash</span>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Instant Loan</span>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <Suspense fallback={<div className="p-10 text-center">Loading...</div>}>
+                <QuickLoansContent />
+            </Suspense>
+        </div>
+    )
 }
