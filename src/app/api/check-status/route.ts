@@ -19,23 +19,23 @@ export async function GET(req: Request) {
         return NextResponse.json({ 
           status: 'FAILED', 
           reason: 'Transaction expired or not found',
-          recoveryAction: 'select_new' // Tell frontend to go to offers
+          recoveryAction: 'select_new' 
         });
     }
 
     const localRecord = JSON.parse(cachedData);
     
-    // Update polling attempts if this is a regular poll
+    // Update polling attempts
     if (action === 'poll') {
       localRecord.pollingAttempts = (localRecord.pollingAttempts || 0) + 1;
       await redis.set(`pay:${id}`, JSON.stringify(localRecord), { EX: 3600 });
     }
 
-    // If we already know the final status, don't ask API again
+    // If we already know the final status from a previous check, return it
     if (localRecord.status === 'COMPLETED' || localRecord.status === 'FAILED') {
       return NextResponse.json({ 
         status: localRecord.status,
-        mpesaCode: localRecord.mpesaCode, // Include M-Pesa code if available
+        mpesaCode: localRecord.mpesaCode,
         originalAmount: localRecord.originalAmount,
         phone: localRecord.userFriendlyPhone
       });
@@ -52,42 +52,54 @@ export async function GET(req: Request) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10000) // 10s Timeout
+      signal: AbortSignal.timeout(10000)
     });
 
     const apiData = await apiRes.json();
     
-    // 3. Determine Status
-    // We map various possible API responses to our 3 core states
+    // --- 3. LOGIC FIX IS HERE ---
+    
     let newStatus = 'PENDING';
+    
+    // Normalize data
     const remoteStatus = (apiData.TransactionStatus || apiData.status || '').toLowerCase();
     const resultCode = String(apiData.ResultCode || apiData.ResponseCode || '');
+    const mpesaReceipt = apiData.TransactionReceipt || apiData.TransactionReceipt || null;
 
-    if (remoteStatus === 'success' || remoteStatus === 'completed' || resultCode === '0' || resultCode === '200') {
+    // A. CHECK FOR SUCCESS
+    // STRICT CHECK: Must be 'completed'/'success' AND have an M-Pesa Receipt
+    // We removed "resultCode === 200" because PesaFlux returns 200 for Pending requests too.
+    if (
+        (remoteStatus === 'success' || remoteStatus === 'completed' || resultCode === '0') && 
+        mpesaReceipt && mpesaReceipt.length > 5
+    ) {
         newStatus = 'COMPLETED';
-    } else if (remoteStatus === 'failed' || remoteStatus === 'cancelled' || 
-               resultCode === '1032' || resultCode === '1019' || 
-               (resultCode !== '' && resultCode !== '0' && resultCode !== '200')) {
-        // If result code exists but isn't success, it failed
+    } 
+    // B. CHECK FOR FAILURE
+    else if (
+        remoteStatus === 'failed' || 
+        remoteStatus === 'cancelled' || 
+        resultCode === '1032' || // Cancelled by user
+        resultCode === '1037' || // Timeout
+        resultCode === '2001' || // Invalid info
+        (remoteStatus !== 'pending' && resultCode !== '200' && resultCode !== '0' && resultCode !== '') // Catch-all for other non-success codes
+    ) {
         newStatus = 'FAILED';
     }
+    // C. OTHERWISE, IT REMAINS PENDING
 
     // 4. Update Redis if status changed
     if (newStatus !== 'PENDING') {
-      // Extract M-Pesa receipt number if available
-      const mpesaCode = apiData.TransactionReceipt || apiData.TransactionReceipt || null;
-      
       await redis.set(`pay:${id}`, JSON.stringify({
         ...localRecord,
         status: newStatus,
-        mpesaCode: mpesaCode, // Store M-Pesa receipt number
-        apiResponse: apiData, // Store full API response for debugging
+        mpesaCode: mpesaReceipt,
+        apiResponse: apiData, 
         updatedAt: Date.now(),
-        // If failed, provide more context
         failureReason: newStatus === 'FAILED' ? apiData.ResultDesc || apiData.ResponseDescription : null
-      }), { EX: 3600 }); // Keep final result for 1 hour
+      }), { EX: 3600 });
     } else {
-      // Still pending, update timestamp and extend TTL
+      // Still pending
       await redis.set(`pay:${id}`, JSON.stringify({
         ...localRecord,
         lastCheckedAt: Date.now()
@@ -96,18 +108,15 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ 
       status: newStatus,
-      mpesaCode: newStatus === 'COMPLETED' ? (apiData.TransactionReceipt || null) : null,
+      mpesaCode: newStatus === 'COMPLETED' ? mpesaReceipt : null,
       originalAmount: localRecord.originalAmount,
       phone: localRecord.userFriendlyPhone,
-      // For recovery screen
       canRetry: newStatus === 'FAILED',
       retryCount: localRecord.retryCount || 0
     });
 
   } catch (error) {
     console.error("[STATUS-CHECK-ERROR]", error);
-    // Return PENDING on network error so frontend keeps polling
-    // But add a flag that this was a network error
     return NextResponse.json({ 
       status: 'PENDING',
       networkError: true,
