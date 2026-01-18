@@ -19,8 +19,6 @@ export async function POST(req: Request) {
 
     const formattedPhone = formatPhoneNumber(phoneNumber);
     const cleanAmount = String(Math.ceil(Number(amount))); 
-    
-    // Create a unique reference for your internal records
     const uniqueRef = `${serviceType === 'FULIZA_BOOST' ? 'FZ' : 'LN'}_${idNumber || 'NA'}_${Date.now().toString().slice(-4)}`;
 
     const payload = {
@@ -31,24 +29,26 @@ export async function POST(req: Request) {
       reference: uniqueRef
     };
 
-    console.log(`[STK-INIT] Payload:`, JSON.stringify(payload));
+    console.log(`[STK-INIT] Sending to PesaFlux...`);
 
     const response = await fetch(`${process.env.PESAFLUX_URL}/initiatestk`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      // Add a timeout to prevent hanging
       signal: AbortSignal.timeout(15000)
     });
 
     const data = await response.json();
-    console.log(`[STK-RES] PesaFlux Response:`, data);
+    console.log(`[STK-RES] Response:`, data);
 
-    // PesaFlux returns 'transaction_request_id' (e.g. SOFTPID...)
+    // PesaFlux returns 'transaction_request_id' (e.g. SOFTPID28092024...)
     if (data.success === "200" || data.transaction_request_id) {
-      const trackingId = data.transaction_request_id; // THIS IS THE KEY
+      const trackingId = data.transaction_request_id; // <--- THIS IS CRITICAL
+      
       const redis = await getRedisClient();
       
-      // Save PENDING state to Redis using the SOFTPID
+      // We use the SOFTPID as the Redis Key
       await redis.set(`pay:${trackingId}`, JSON.stringify({
         status: 'PENDING',
         phone: phoneNumber,
@@ -58,7 +58,7 @@ export async function POST(req: Request) {
         createdAt: Date.now()
       }), { EX: 3600 });
 
-      // Send the SOFTPID back to frontend to poll
+      // Send the SOFTPID to the frontend
       return NextResponse.json({ success: true, checkoutRequestID: trackingId });
     } 
     
