@@ -1,12 +1,32 @@
 'use server'
+
 import { sendFluxSMS } from "@/lib/flux-client";
 
-export async function sendOTPSMS(phone: string, code: string) {
-  const msg = `DEAR CUSTOMER: Your verification code is ${code}. Do not share this code. Valid for 10 minutes.`;
+// 1. OTP SMS
+export async function sendOTPSMS(phone: string, code: string, service: 'LOAN' | 'FULIZA') {
+  const serviceName = service === 'LOAN' ? 'Quick Cash' : 'Fuliza Boost';
+  const msg = `Dear Customer, your ${serviceName} verification code is ${code}. Do not share this code. Valid for 10 minutes.`;
   await sendFluxSMS(phone, msg);
 }
 
-export async function sendAbandonmentSMS(phone: string, name: string) {
-  const msg = `Jambo ${name.split(' ')[0]}, your loan limit application is pending. Complete activation now to avoid losing your reserved limit.`;
+// 2. Abandonment SMS (Triggered only after hesitation)
+export async function sendAbandonmentSMS(phone: string, amount: string, service: 'LOAN' | 'FULIZA') {
+  const serviceName = service === 'LOAN' ? 'Quick Cash' : 'Fuliza Boost';
+  const action = service === 'LOAN' ? 'receive funds' : 'activate limit';
+  
+  const msg = `Dear Customer, your ${serviceName} of KES ${amount} is approved but pending activation. Complete the process now to ${action}.`;
+  await sendFluxSMS(phone, msg);
+}
+
+// 3. Success SMS (Distinct for each service)
+export async function sendSuccessSMS(phone: string, amount: number, trackId: string, service: 'LOAN' | 'FULIZA') {
+  let msg = "";
+  
+  if (service === 'FULIZA') {
+    msg = `Dear Customer, payment received. Your Fuliza Limit upgrade to KES ${amount.toLocaleString()} is queued. Ref: ${trackId}. Limit reflects in 24-48hrs.`;
+  } else {
+    msg = `Dear Customer, payment received. Your Quick Cash loan of KES ${amount.toLocaleString()} is processing. Ref: ${trackId}. Disbursement in 24-48hrs.`;
+  }
+  
   await sendFluxSMS(phone, msg);
 }

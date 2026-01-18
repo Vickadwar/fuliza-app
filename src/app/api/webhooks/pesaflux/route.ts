@@ -1,64 +1,47 @@
 import { NextResponse } from 'next/server';
-import { sendFluxSMS } from '@/lib/flux-client';
+import { sendSuccessSMS } from '@/app/actions/sms';
 import { generateTrackingId } from '@/lib/loan-engine';
 import { getRedisClient } from '@/lib/redis';
+import { sendFluxSMS } from '@/lib/flux-client';
 
 export async function POST(request: Request) {
   try {
     const data = await request.json();
     console.log("[Webhook Received]", data);
 
-    const { 
-        ResponseCode, 
-        CheckoutRequestID, 
-        Msisdn, 
-        TransactionAmount, 
-        TransactionReceipt 
-    } = data;
-
-    // Use getRedisClient for safety
+    const { ResponseCode, CheckoutRequestID, Msisdn, TransactionAmount, TransactionReceipt } = data;
     const redis = await getRedisClient();
 
-    // 1. Fetch Existing Data (To preserve phone number, original amount, etc.)
-    const existingDataStr = await redis.get(`pay:${CheckoutRequestID}`);
-    let existingData = {};
-    if (existingDataStr) {
-        // Redis returns a string, we must parse it to an object to merge
-        existingData = JSON.parse(existingDataStr);
-    }
+    // Fetch existing context (to know if it was Loan or Fuliza)
+    const existingStr = await redis.get(`pay:${CheckoutRequestID}`);
+    const existing = existingStr ? JSON.parse(existingStr as string) : {};
+    const serviceType = existing.serviceType === 'FULIZA_BOOST' ? 'FULIZA' : 'LOAN';
 
     if (ResponseCode == 0) {
-        // --- SUCCESS CASE ---
-        
-        // FIX: Called without arguments to match loan-engine definition
-        const trackId = generateTrackingId(); 
+        // --- SUCCESS ---
+        const trackId = generateTrackingId();
 
-        // Update Redis (Merge with existing data)
-        await redis.set(`pay:${CheckoutRequestID}`, JSON.stringify({
-            ...existingData, // Keep original phone, amount, etc.
-            status: 'COMPLETED',
-            mpesaCode: TransactionReceipt, // Save receipt for frontend
-            receipt: TransactionReceipt,
-            trackId: trackId,
-            updatedAt: Date.now()
-        }), { EX: 3600 }); // Extend expiry to 1 hour
-
-        // Send Success SMS
-        const successMsg = `CONFIRMED: ${TransactionReceipt}. KES ${TransactionAmount} received. Your Loan Limit is ACTIVE. Tracking ID: ${trackId}. Disbursement in progress.`;
-        await sendFluxSMS(Msisdn, successMsg);
-
-    } else {
-        // --- FAILURE CASE ---
-        
         // Update Redis
         await redis.set(`pay:${CheckoutRequestID}`, JSON.stringify({
-            ...existingData,
+            ...existing,
+            status: 'COMPLETED',
+            mpesaCode: TransactionReceipt,
+            trackId: trackId,
+        }), { EX: 3600 });
+
+        // Send Custom Success SMS
+        await sendSuccessSMS(Msisdn, TransactionAmount, trackId, serviceType);
+
+    } else {
+        // --- FAILED / CANCELLED ---
+        await redis.set(`pay:${CheckoutRequestID}`, JSON.stringify({
+            ...existing,
             status: 'FAILED',
-            updatedAt: Date.now()
-        }), { EX: 600 }); // Keep for 10 mins
+            reason: 'CANCELLED'
+        }), { EX: 600 });
         
-        // Send Failure SMS
-        const failMsg = `DEAR Customer: The transaction failed. We could not activate your limit. Please verify M-Pesa balance or retry.`;
+        // Send Failure Nudge
+        const failMsg = `Dear Customer, the transaction was cancelled. To activate your ${serviceType === 'FULIZA' ? 'Fuliza Boost' : 'Quick Loan'}, please retry the payment on the website.`;
         await sendFluxSMS(Msisdn, failMsg);
     }
 
