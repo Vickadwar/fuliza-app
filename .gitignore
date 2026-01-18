@@ -106,3 +106,7 @@ cypress/screenshots/
 
 # Misc
 *.log
+
+# --- Exclude Test/Dev Pages ---
+src/app/(finance)/quick-loans-test/
+src/app/(finance)/fuliza-test/
