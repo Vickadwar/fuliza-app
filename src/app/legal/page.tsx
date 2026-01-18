@@ -5,9 +5,7 @@ import Link from 'next/link';
 import { 
   ArrowLeft, 
   ShieldCheck, 
-  Scale, 
   Lock, 
-  FileText, 
   AlertTriangle, 
   CheckCircle2,
   Zap,
@@ -16,7 +14,6 @@ import {
   CreditCard,
   Server,
   Eye,
-  ChevronRight,
   Globe
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -51,7 +48,7 @@ export default function LegalPage() {
             <nav className="flex items-center gap-6 text-xs font-bold text-slate-500">
               <Link href="/" className="hover:text-slate-900 transition-colors">Home</Link>
               <Link href="/fuliza" className="hover:text-slate-900 transition-colors">Products</Link>
-              <Link href="#" className="text-slate-900 bg-slate-100 px-3 py-1.5 rounded-full">Legal</Link>
+              <Link href="/legal" className="text-slate-900 bg-slate-100 px-3 py-1.5 rounded-full">Legal</Link>
             </nav>
           </div>
           
@@ -89,7 +86,7 @@ export default function LegalPage() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                 </span>
-                Last updated: <span className="text-slate-900 font-bold">January 15, 2026</span>
+                Last updated: <span className="text-slate-900 font-bold">January 18, 2026</span>
             </div>
         </div>
       </div>
@@ -278,13 +275,13 @@ export default function LegalPage() {
             <div className="flex gap-8 md:justify-end">
                 <div className="flex flex-col gap-2">
                     <span className="text-[10px] font-bold text-slate-900 uppercase tracking-wide">Legal</span>
-                    <a href="#" className="text-xs text-slate-500 hover:text-blue-600">Privacy</a>
-                    <a href="#" className="text-xs text-slate-500 hover:text-blue-600">Terms</a>
+                    <a href="/legal" className="text-xs text-slate-500 hover:text-blue-600">Privacy</a>
+                    <a href="/legal" className="text-xs text-slate-500 hover:text-blue-600">Terms</a>
                 </div>
                  <div className="flex flex-col gap-2">
                     <span className="text-[10px] font-bold text-slate-900 uppercase tracking-wide">Product</span>
                     <a href="/fuliza" className="text-xs text-slate-500 hover:text-blue-600">Boost Limit</a>
-                    <a href="#" className="text-xs text-slate-500 hover:text-blue-600">Quick Loan</a>
+                    <a href="/quick-loans" className="text-xs text-slate-500 hover:text-blue-600">Quick Loan</a>
                 </div>
             </div>
           </div>

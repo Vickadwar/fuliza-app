@@ -4,21 +4,9 @@ import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { 
-  Zap, 
-  Menu, 
-  X, 
-  Banknote,
-  Lock,
-  ChevronDown,
-  Sparkles,
-  ShieldCheck,
-  CheckCircle2,
-  Users,
-  Clock,
-  Star,
-  ArrowRight,
-  TrendingUp,
-  Check
+  Zap, Menu, X, Banknote, Lock, ChevronDown, 
+  Sparkles, ShieldCheck, CheckCircle2, Users, Clock, 
+  Star, ArrowRight, TrendingUp, Check, Activity, BarChart2, Loader2
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -38,8 +26,8 @@ export default function HomePage() {
 
   // Theme Config
   const isFuliza = activeTab === 'fuliza';
-  const themeClass = isFuliza ? 'text-blue-600' : 'text-emerald-500';
-  const btnClass = isFuliza ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-500 hover:bg-emerald-600';
+  const themeClass = isFuliza ? 'text-blue-700' : 'text-emerald-700';
+  const btnClass = isFuliza ? 'bg-blue-700 hover:bg-blue-800' : 'bg-emerald-700 hover:bg-emerald-800';
 
   // Live Ticker Data
   const [boostIndex, setBoostIndex] = useState(0)
@@ -76,429 +64,325 @@ export default function HomePage() {
       if (activeTab === 'fuliza') {
         router.push('/fuliza')
       } else {
-        let finalAmount = Number(loanAmount.replace(/,/g, '')) || 0
-        if (finalAmount < 500) finalAmount = 500
-        router.push(`/quick-loans?amount=${finalAmount}`) 
+        router.push('/quick-loans') 
       }
     }, 600)
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 overflow-x-hidden selection:bg-blue-100 selection:text-blue-900">
+    <div className="min-h-screen bg-slate-100 font-sans text-slate-900 overflow-x-hidden selection:bg-blue-900 selection:text-white">
       
-      {/* --- LIVE TICKER --- */}
-      <div className="bg-slate-900 text-white py-2 px-4 relative z-50">
+      {/* --- SYSTEM STATUS BAR --- */}
+      <div className="bg-slate-900 text-slate-400 py-1.5 px-4 text-[10px] font-mono border-b border-slate-800">
         <div className="container mx-auto flex justify-between items-center max-w-5xl">
-          <div className="flex items-center gap-2">
-             <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
-             <span className="text-[10px] font-bold uppercase tracking-wider opacity-80">Live Activity</span>
+          <div className="flex items-center gap-4">
+             <div className="flex items-center gap-1.5">
+                <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="font-bold text-emerald-500 tracking-wider">SYSTEM ONLINE</span>
+             </div>
+             <div className="hidden sm:flex items-center gap-1">
+                <Activity className="w-3 h-3" />
+                <span>API Latency: 45ms</span>
+             </div>
           </div>
-          <div key={boostIndex} className="flex items-center gap-2 animate-in slide-in-from-bottom-2 fade-in duration-500">
-             <span className="text-[10px] font-medium text-slate-300">{boosts[boostIndex].name}</span>
-             <span className={`text-[10px] font-bold ${boosts[boostIndex].type === 'boost' ? 'text-blue-400' : 'text-emerald-400'}`}>
-               {boosts[boostIndex].amount}
+          <div key={boostIndex} className="flex items-center gap-2 font-mono">
+             <span className="text-slate-500">LATEST:</span>
+             <span className={`font-bold ${boosts[boostIndex].type === 'boost' ? 'text-blue-400' : 'text-emerald-400'}`}>
+               {boosts[boostIndex].name} - {boosts[boostIndex].amount}
              </span>
           </div>
         </div>
       </div>
 
-      {/* --- HEADER --- */}
-      <header className="glass-header transition-all duration-300">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between max-w-5xl">
+      {/* --- DENSE HEADER --- */}
+      <header className="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-40">
+        <div className="container mx-auto px-4 h-14 flex items-center justify-between max-w-5xl">
           <div className="flex items-center gap-2">
-            <div className={`h-8 w-8 rounded-xl flex items-center justify-center transition-colors duration-500 ${isFuliza ? 'bg-blue-600' : 'bg-emerald-500'}`}>
+            <div className={`h-8 w-8 rounded bg-slate-900 flex items-center justify-center`}>
               <Zap className="h-5 w-5 text-white fill-current" />
             </div>
-            <span className="text-lg font-black tracking-tight text-slate-900">
-              FulizaBoost
+            <span className="text-lg font-black tracking-tighter text-slate-900 uppercase">
+              FLUX<span className="text-blue-700">LOANS</span>
             </span>
           </div>
           
-          <div className="hidden md:flex items-center gap-6">
-            <nav className="flex items-center gap-6 text-xs font-bold text-slate-600">
-              <button onClick={() => setActiveTab('fuliza')} className={`transition-colors ${isFuliza ? 'text-blue-600' : 'hover:text-blue-600'}`}>Boost Limit</button>
-              <button onClick={() => setActiveTab('loan')} className={`transition-colors ${!isFuliza ? 'text-emerald-600' : 'hover:text-emerald-600'}`}>Quick Cash</button>
+          <div className="hidden md:flex items-center gap-1">
+            <nav className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+              <button 
+                onClick={() => setActiveTab('fuliza')} 
+                className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wide rounded-md transition-all ${isFuliza ? 'bg-white shadow-sm text-blue-700' : 'text-slate-500 hover:text-slate-900'}`}
+              >
+                Boost Limit
+              </button>
+              <button 
+                onClick={() => setActiveTab('loan')} 
+                className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wide rounded-md transition-all ${!isFuliza ? 'bg-white shadow-sm text-emerald-700' : 'text-slate-500 hover:text-slate-900'}`}
+              >
+                Quick Cash
+              </button>
             </nav>
-            <Button className="bg-slate-900 h-9 px-5 text-xs font-bold rounded-lg hover:bg-slate-800 transition-all">
-              Login
-            </Button>
           </div>
           
-          <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="md:hidden p-2 text-slate-900">
-            {isMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-          </button>
+          <div className="flex gap-2">
+             <Link href="/quick-loans/track">
+                <Button variant="outline" className="h-8 text-xs font-bold border-slate-300 text-slate-600 hidden sm:flex">
+                   Track ID
+                </Button>
+             </Link>
+             <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="md:hidden p-2 text-slate-900 border border-slate-200 rounded">
+                {isMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+             </button>
+          </div>
         </div>
       </header>
 
-      {/* --- MOBILE MENU --- */}
-      {isMenuOpen && (
-        <div className="fixed inset-0 z-40 bg-white/95 backdrop-blur-xl md:hidden pt-24 px-6 animate-in fade-in slide-in-from-top-5">
-            <nav className="space-y-4">
-              <button onClick={() => { setActiveTab('fuliza'); setIsMenuOpen(false); }} className="flex items-center gap-4 w-full p-4 rounded-2xl bg-slate-50 border border-slate-100 active:scale-95 transition-transform">
-                <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
-                    <Zap className="h-5 w-5 fill-current" />
-                </div>
-                <div className="text-left">
-                    <span className="font-bold text-base text-slate-900 block">Fuliza Boost</span>
-                    <span className="text-xs text-slate-500 font-medium">Increase overdraft limit</span>
-                </div>
-              </button>
-              <button onClick={() => { setActiveTab('loan'); setIsMenuOpen(false); }} className="flex items-center gap-4 w-full p-4 rounded-2xl bg-slate-50 border border-slate-100 active:scale-95 transition-transform">
-                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600">
-                    <Banknote className="h-5 w-5" />
-                </div>
-                <div className="text-left">
-                    <span className="font-bold text-base text-slate-900 block">Quick Cash</span>
-                    <span className="text-xs text-slate-500 font-medium">Instant M-Pesa loans</span>
-                </div>
-              </button>
-            </nav>
-        </div>
-      )}
-
       {/* --- HERO SECTION --- */}
-      <main className="container mx-auto px-4 max-w-5xl">
-        <section className="pt-8 pb-12 md:pt-16 md:pb-20">
-          <div className="grid lg:grid-cols-2 gap-10 items-center">
-            
-            {/* Dynamic Text Content */}
-            <div className="text-center lg:text-left order-2 lg:order-1 animate-in slide-in-from-left-4 duration-700">
-               <div className={`inline-flex items-center gap-1.5 px-3 py-1 mb-6 rounded-full border text-[10px] font-bold uppercase tracking-wider transition-colors duration-500 ${isFuliza ? 'bg-blue-50 border-blue-100 text-blue-600' : 'bg-emerald-50 border-emerald-100 text-emerald-600'}`}>
-                  <Sparkles className="h-3 w-3 fill-current" />
-                  <span>AI Powered Finance</span>
-                </div>
-              
-              <h1 className="text-4xl sm:text-6xl font-black tracking-tight text-slate-900 leading-[1.1] mb-6">
-                {isFuliza ? (
-                  <>Grow your <span className="text-blue-600">Fuliza Limit</span> instantly.</>
-                ) : (
-                  <>Get instant <span className="text-emerald-500">M-Pesa Cash</span> loans.</>
-                )}
-              </h1>
-              
-              <p className="text-base text-slate-500 font-medium max-w-sm mx-auto lg:mx-0 mb-8 leading-relaxed">
-                {isFuliza 
-                  ? "Our algorithm analyzes your transaction history to unlock higher overdraft limits in seconds. Safe, secure, and automated."
-                  : "Emergency? Business deal? Access unsecured mobile loans directly to your M-Pesa. No paperwork, just instant disbursement."
-                }
-              </p>
-              
-              <div className="flex justify-center lg:justify-start gap-8 border-t border-slate-100 pt-6">
-                 <div>
-                    <div className="text-2xl font-black text-slate-900">98%</div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Success Rate</div>
-                 </div>
-                 <div>
-                    <div className="text-2xl font-black text-slate-900">15s</div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Processing</div>
-                 </div>
-                 <div>
-                    <div className="text-2xl font-black text-slate-900">50k+</div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Users</div>
-                 </div>
-              </div>
+      <main className="container mx-auto px-4 max-w-5xl pb-12">
+        
+        {/* MOBILE TABS (VISIBLE ON SMALL SCREENS) */}
+        <div className="md:hidden mt-4 mb-6">
+            <div className="grid grid-cols-2 gap-2 bg-slate-200 p-1 rounded-lg">
+                <button onClick={() => setActiveTab('fuliza')} className={`py-2 text-xs font-bold uppercase rounded ${isFuliza ? 'bg-white shadow text-blue-800' : 'text-slate-500'}`}>Fuliza Boost</button>
+                <button onClick={() => setActiveTab('loan')} className={`py-2 text-xs font-bold uppercase rounded ${!isFuliza ? 'bg-white shadow text-emerald-800' : 'text-slate-500'}`}>Quick Loan</button>
             </div>
+        </div>
+
+        <div className="grid lg:grid-cols-12 gap-8 items-start pt-6 md:pt-12">
             
-            {/* Interactive Card */}
-            <div className="w-full max-w-md mx-auto order-1 lg:order-2 perspective-1000">
-              <Card className="border-0 shadow-2xl shadow-slate-200 bg-white rounded-3xl overflow-visible ring-1 ring-slate-100 relative z-20">
+            {/* LEFT COLUMN: THE FORM (UTILITY STYLE) */}
+            <div className="lg:col-span-5 order-2 lg:order-1">
+              <Card className="border-0 shadow-xl bg-white rounded-xl overflow-hidden ring-1 ring-slate-200">
+                <div className={`h-2 w-full ${isFuliza ? 'bg-blue-700' : 'bg-emerald-700'}`}></div>
                 <CardContent className="p-6">
-                  <div className="flex justify-between items-center mb-6">
-                    <span className="text-base font-black text-slate-900">Check Eligibility</span>
-                    <div className="flex items-center gap-1.5 text-[10px] bg-slate-100 text-slate-500 font-bold px-2.5 py-1 rounded-full">
-                      <Lock className="w-3 h-3"/> Bank Grade Security
+                  <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-100">
+                    <div>
+                        <span className="text-sm font-black text-slate-900 uppercase block">
+                            {isFuliza ? 'Limit Optimizer' : 'Loan Request'}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-400">SECURE GATEWAY v4.2</span>
                     </div>
+                    <Lock className="w-4 h-4 text-slate-400"/> 
                   </div>
                   
-                  <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v)} className="w-full">
-                    <TabsList className="grid w-full grid-cols-2 h-12 bg-slate-100 p-1 rounded-xl mb-6">
-                      <TabsTrigger value="fuliza" className="rounded-lg text-xs font-bold data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm transition-all">Fuliza Boost</TabsTrigger>
-                      <TabsTrigger value="loan" className="rounded-lg text-xs font-bold data-[state=active]:bg-white data-[state=active]:text-emerald-600 data-[state=active]:shadow-sm transition-all">Quick Cash</TabsTrigger>
-                    </TabsList>
-
-                    <div className="min-h-[220px]">
+                  <div className="min-h-[220px]">
                       {/* FULIZA FORM */}
-                      <TabsContent value="fuliza" className="space-y-4 mt-0 animate-in fade-in slide-in-from-right-4 duration-300">
-                        <div className="space-y-2">
-                          <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Avg. Monthly M-Pesa Usage</label>
-                          <div className="relative">
-                            <button
-                              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                              className={`w-full flex items-center justify-between px-4 h-14 bg-white border rounded-xl text-left transition-all hover:border-blue-400 ${isDropdownOpen ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-200'}`}
-                            >
-                              <span className={`font-bold text-sm ${mpesaRange ? 'text-slate-900' : 'text-slate-400'}`}>
-                                {mpesaRange ? [
-                                  { value: 'low', label: 'Ksh 5,000 - 15,000' },
-                                  { value: 'mid', label: 'Ksh 15,000 - 50,000' },
-                                  { value: 'high', label: 'Ksh 50,000 - 150,000' },
-                                  { value: 'elite', label: 'Above Ksh 150,000' }
-                                ].find(opt => opt.value === mpesaRange)?.label : 'Select range...'}
-                              </span>
-                              <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
-                            </button>
+                      {isFuliza ? (
+                        <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Select M-Pesa Band</label>
+                                <div className="relative">
+                                    <button
+                                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                                    className={`w-full flex items-center justify-between px-4 h-12 bg-slate-50 border rounded-lg text-left transition-all ${isDropdownOpen ? 'border-blue-600 bg-white' : 'border-slate-200'}`}
+                                    >
+                                    <span className={`font-bold text-xs ${mpesaRange ? 'text-slate-900' : 'text-slate-400'}`}>
+                                        {mpesaRange ? [
+                                        { value: 'low', label: 'KES 5k - 15k' },
+                                        { value: 'mid', label: 'KES 15k - 50k' },
+                                        { value: 'high', label: 'KES 50k - 150k' },
+                                        { value: 'elite', label: 'Over KES 150k' }
+                                        ].find(opt => opt.value === mpesaRange)?.label : 'Choose Range...'}
+                                    </span>
+                                    <ChevronDown className="h-4 w-4 text-slate-400" />
+                                    </button>
+                                    
+                                    {isDropdownOpen && (
+                                    <div className="absolute top-full mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl z-50 overflow-hidden">
+                                        {[
+                                        { value: 'low', label: 'KES 5k - 15k' },
+                                        { value: 'mid', label: 'KES 15k - 50k' },
+                                        { value: 'high', label: 'KES 50k - 150k' },
+                                        { value: 'elite', label: 'Over KES 150k' }
+                                        ].map((option) => (
+                                        <button
+                                            key={option.value}
+                                            onClick={() => handleRangeSelect(option.value)}
+                                            className="w-full px-4 py-3 text-left hover:bg-slate-100 flex justify-between items-center border-b border-slate-50 last:border-0"
+                                        >
+                                            <span className="font-bold text-slate-700 text-xs">{option.label}</span>
+                                            {mpesaRange === option.value && <Check className="h-3 w-3 text-blue-600" />}
+                                        </button>
+                                        ))}
+                                    </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* PREDICTION BOX */}
+                            {predictedLimit && (
+                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between animate-in zoom-in-95">
+                                    <div className="flex items-center gap-3">
+                                        <div className="h-8 w-8 bg-blue-100 rounded-md flex items-center justify-center text-blue-700">
+                                            <BarChart2 className="w-4 h-4" />
+                                        </div>
+                                        <div>
+                                            <div className="text-[9px] font-bold text-blue-600 uppercase">Algorithm Estimate</div>
+                                            <div className="text-sm font-black text-slate-900">KES {predictedLimit.max}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                             
-                            {isDropdownOpen && (
-                              <div className="absolute top-full mt-2 w-full bg-white border border-slate-100 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 p-1">
-                                {[
-                                  { value: 'low', label: 'Ksh 5,000 - 15,000' },
-                                  { value: 'mid', label: 'Ksh 15,000 - 50,000' },
-                                  { value: 'high', label: 'Ksh 50,000 - 150,000' },
-                                  { value: 'elite', label: 'Above Ksh 150,000' }
-                                ].map((option) => (
+                            <Button
+                                onClick={handleStart}
+                                disabled={isLoading || !mpesaRange}
+                                className={`w-full ${btnClass} text-white font-bold h-12 text-sm rounded-lg shadow-md mt-2`}
+                            >
+                                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Start Analysis'}
+                            </Button>
+                        </div>
+                      ) : (
+                        /* LOAN FORM */
+                        <div className="space-y-4 animate-in fade-in slide-in-from-left-4 duration-300">
+                             <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                                    Desired Amount
+                                </label>
+                                <div className="relative">
+                                    <input
+                                    type="text"
+                                    placeholder="e.g. 5,000"
+                                    value={loanAmount}
+                                    onChange={(e) => {
+                                        const val = e.target.value.replace(/\D/g, '');
+                                        setLoanAmount(val ? Number(val).toLocaleString() : '');
+                                    }}
+                                    className="w-full pl-3 pr-10 h-12 bg-slate-50 border border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-lg text-lg font-bold text-slate-900 outline-none placeholder:text-slate-300 font-mono"
+                                    />
+                                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                        <span className="text-[10px] font-black text-slate-400">KES</span>
+                                    </div>
+                                </div>
+                              </div>
+                              
+                              <div className="grid grid-cols-3 gap-2">
+                                {['2,000', '5,000', '10,000'].map((amount) => (
                                   <button
-                                    key={option.value}
-                                    onClick={() => handleRangeSelect(option.value)}
-                                    className="w-full px-4 py-3 text-left hover:bg-blue-50 rounded-lg flex justify-between items-center group"
+                                    key={amount}
+                                    onClick={() => setLoanAmount(amount)}
+                                    className="py-2 text-[10px] font-bold rounded border border-slate-200 bg-white hover:border-emerald-500 hover:text-emerald-700 transition-colors"
                                   >
-                                    <span className="font-bold text-slate-700 text-sm group-hover:text-blue-700">{option.label}</span>
-                                    {mpesaRange === option.value && <Check className="h-4 w-4 text-blue-600" />}
+                                    {amount}
                                   </button>
                                 ))}
                               </div>
-                            )}
-                          </div>
+                            
+                            <Button
+                              onClick={handleStart}
+                              disabled={isLoading || !loanAmount}
+                              className={`w-full ${btnClass} text-white font-bold h-12 text-sm rounded-lg shadow-md mt-2`}
+                            >
+                              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Process Request'}
+                            </Button>
                         </div>
-
-                        {/* PREDICTION BOX */}
-                        <div className={`transition-all duration-500 ease-out overflow-hidden ${predictedLimit ? 'max-h-24 opacity-100' : 'max-h-0 opacity-0'}`}>
-                          <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="h-10 w-10 bg-white rounded-full flex items-center justify-center shadow-sm">
-                                  <TrendingUp className="w-5 h-5 text-blue-600" />
-                                </div>
-                                <div>
-                                  <div className="text-[10px] font-bold text-blue-500 uppercase">Estimated Limit</div>
-                                  <div className="text-base font-black text-slate-900">KES {predictedLimit?.max}</div>
-                                </div>
-                              </div>
-                              <ArrowRight className="w-5 h-5 text-blue-300" />
-                          </div>
-                        </div>
-                        
-                        <Button
-                          onClick={handleStart}
-                          disabled={isLoading || !mpesaRange}
-                          className={`w-full ${btnClass} text-white font-bold h-14 text-base rounded-xl shadow-lg mt-2 transition-transform active:scale-95`}
-                        >
-                          {isLoading ? 'Analyzing Profile...' : 'Boost My Limit'}
-                        </Button>
-                      </TabsContent>
-                      
-                      {/* LOAN FORM */}
-                      <TabsContent value="loan" className="space-y-4 mt-0 animate-in fade-in slide-in-from-left-4 duration-300">
-                         <div className="space-y-2">
-                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">
-                                I want to borrow
-                            </label>
-                            <div className="relative group">
-                                <input
-                                type="text"
-                                placeholder="e.g. 5,000"
-                                value={loanAmount}
-                                onChange={(e) => {
-                                    const val = e.target.value.replace(/\D/g, '');
-                                    setLoanAmount(val ? Number(val).toLocaleString() : '');
-                                }}
-                                className="w-full pl-4 pr-12 h-14 bg-white border border-slate-200 hover:border-emerald-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl text-lg font-bold text-slate-900 outline-none placeholder:text-slate-300 transition-all"
-                                />
-                                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
-                                <span className="text-xs font-black text-slate-400">KES</span>
-                                </div>
-                            </div>
-                          </div>
-                          
-                          <div className="grid grid-cols-3 gap-2">
-                            {['2,000', '5,000', '10,000'].map((amount) => (
-                              <button
-                                key={amount}
-                                onClick={() => setLoanAmount(amount)}
-                                className="py-2.5 text-xs font-bold rounded-lg bg-slate-50 text-slate-600 border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-700 transition-all"
-                              >
-                                {amount}
-                              </button>
-                            ))}
-                          </div>
-                        
-                        <Button
-                          onClick={handleStart}
-                          disabled={isLoading || !loanAmount}
-                          className={`w-full ${btnClass} text-white font-bold h-14 text-base rounded-xl shadow-lg mt-2 transition-transform active:scale-95`}
-                        >
-                          {isLoading ? 'Processing...' : 'Get Cash Now'}
-                        </Button>
-                      </TabsContent>
-                    </div>
-                  </Tabs>
+                      )}
+                  </div>
                 </CardContent>
+                <div className="bg-slate-50 p-3 border-t border-slate-100 flex justify-between items-center text-[10px] text-slate-500 font-bold uppercase">
+                    <span><ShieldCheck className="w-3 h-3 inline mr-1" /> Verified</span>
+                    <span><Clock className="w-3 h-3 inline mr-1" /> 24/7 Instant</span>
+                </div>
               </Card>
             </div>
-          </div>
-        </section>
 
-        {/* --- DYNAMIC MARKETING SECTION --- */}
-        <section className="py-10 transition-all duration-500">
-            {isFuliza ? (
-                // FULIZA CONTENT
-                <div className="bg-slate-900 rounded-3xl p-8 md:p-12 text-white relative overflow-hidden animate-in fade-in slide-in-from-bottom-8 duration-700">
-                    <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600 rounded-full blur-[120px] opacity-20 translate-x-1/2 -translate-y-1/2"></div>
-                    
-                    <div className="relative z-10 grid md:grid-cols-2 gap-10 items-center">
-                        <div>
-                            <div className="inline-flex items-center gap-2 text-blue-400 font-bold uppercase tracking-wider text-xs mb-4">
-                                <Zap className="w-4 h-4 fill-current" />
-                                <span>Fuliza Optimization</span>
-                            </div>
-                            <h2 className="text-3xl md:text-5xl font-black mb-6 leading-tight">
-                                Hit your limit? <br/>
-                                <span className="text-blue-500">Break through it.</span>
-                            </h2>
-                            <ul className="space-y-4 mb-8">
-                                <li className="flex items-center gap-3 text-slate-300 font-medium">
-                                    <CheckCircle2 className="w-5 h-5 text-blue-500" />
-                                    <span>Algorithmic limit override</span>
-                                </li>
-                                <li className="flex items-center gap-3 text-slate-300 font-medium">
-                                    <CheckCircle2 className="w-5 h-5 text-blue-500" />
-                                    <span>24/7 Automatic processing</span>
-                                </li>
-                            </ul>
-                            <Button onClick={() => router.push('/fuliza')} className="h-14 px-8 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-transform hover:-translate-y-1 shadow-xl shadow-blue-600/20">
-                                Check My New Limit
-                            </Button>
-                        </div>
-                        
-                        <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-md relative transform md:rotate-2 hover:rotate-0 transition-transform duration-500">
-                            <div className="flex justify-between items-center pb-4 border-b border-white/10 mb-4">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center">
-                                        <Zap className="w-5 h-5 text-white" />
-                                    </div>
-                                    <div>
-                                        <div className="text-white font-bold">Fuliza Limit</div>
-                                        <div className="text-xs text-slate-400">Updated just now</div>
-                                    </div>
-                                </div>
-                                <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded">Active</span>
-                            </div>
-                            <div className="flex justify-between items-end">
-                                <div>
-                                    <div className="text-xs text-slate-400 uppercase font-bold mb-1">Old Limit</div>
-                                    <div className="text-xl font-bold text-slate-500 line-through">KES 500</div>
-                                </div>
-                                <div className="text-right">
-                                    <div className="text-xs text-blue-400 uppercase font-bold mb-1">New Limit</div>
-                                    <div className="text-4xl font-black text-white">KES 5,500</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+            {/* RIGHT COLUMN: THE PITCH (DENSE) */}
+            <div className="lg:col-span-7 order-1 lg:order-2 pt-4">
+                <div className="mb-6">
+                    <span className={`inline-block px-2 py-1 mb-3 rounded text-[10px] font-black uppercase tracking-widest ${isFuliza ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                        {isFuliza ? 'CRB OPTIMIZATION' : 'DIRECT DISBURSEMENT'}
+                    </span>
+                    <h1 className="text-3xl sm:text-5xl font-black text-slate-900 leading-tight mb-4">
+                        {isFuliza ? 'Unlock Your Real Limit.' : 'Liquidity on Demand.'}
+                    </h1>
+                    <p className="text-sm font-medium text-slate-600 leading-relaxed max-w-md">
+                        {isFuliza 
+                            ? "Stop settling for low overdrafts. Our algorithm scans your entire M-Pesa history to calculate and activate your true credit potential."
+                            : "Business opportunity? Emergency? Get cash in your M-Pesa within 60 seconds. No paperwork. No guarantors. Just data."
+                        }
+                    </p>
                 </div>
-            ) : (
-                // LOAN CONTENT
-                <div className="bg-emerald-50 rounded-3xl p-8 md:p-12 relative overflow-hidden animate-in fade-in slide-in-from-bottom-8 duration-700">
-                     <div className="relative z-10 grid md:grid-cols-2 gap-10 items-center">
-                         <div className="order-2 md:order-1">
-                             <div className="space-y-4">
-                                {[
-                                    { name: 'Rent Payment', amount: 'KES 15,000', time: '1 min ago' },
-                                    { name: 'School Fees', amount: 'KES 24,500', time: '5 mins ago' },
-                                    { name: 'Emergency', amount: 'KES 8,000', time: '12 mins ago' },
-                                ].map((tx, i) => (
-                                    <div key={i} className="bg-white p-4 rounded-xl shadow-sm border border-emerald-100 flex justify-between items-center transform hover:scale-105 transition-transform duration-300">
-                                        <div className="flex items-center gap-4">
-                                            <div className="h-10 w-10 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600">
-                                                <Banknote className="w-5 h-5" />
-                                            </div>
-                                            <div>
-                                                <div className="font-bold text-slate-900 text-sm">{tx.name}</div>
-                                                <div className="text-[10px] text-slate-400 uppercase font-bold">{tx.time}</div>
-                                            </div>
-                                        </div>
-                                        <div className="font-black text-slate-900">{tx.amount}</div>
-                                    </div>
-                                ))}
-                             </div>
-                         </div>
 
-                         <div className="order-1 md:order-2">
-                            <div className="inline-flex items-center gap-2 text-emerald-600 font-bold uppercase tracking-wider text-xs mb-4">
-                                <Banknote className="w-4 h-4" />
-                                <span>Instant Liquidity</span>
-                            </div>
-                            <h2 className="text-3xl md:text-5xl font-black mb-6 leading-tight text-slate-900">
-                                Cash in your <br/>
-                                <span className="text-emerald-500">M-Pesa. Now.</span>
-                            </h2>
-                            <p className="text-slate-500 font-medium mb-8 leading-relaxed">
-                                Get unsecured loans up to KES 150,000 disbursed directly to your M-Pesa in under 60 seconds.
-                            </p>
-                            <Button onClick={() => router.push('/quick-loans')} className="h-14 px-8 bg-emerald-500 hover:bg-emerald-400 text-white font-bold rounded-xl text-sm transition-transform hover:-translate-y-1 shadow-xl shadow-emerald-500/20">
-                                Get Cash Now
-                            </Button>
-                         </div>
-                     </div>
+                <div className="grid grid-cols-2 gap-4 max-w-lg">
+                    {[
+                        { label: "Processing", val: "Instant" },
+                        { label: "Success Rate", val: "99.4%" },
+                        { label: "Security", val: "AES-256" },
+                        { label: "Active Users", val: "50k+" }
+                    ].map((stat, i) => (
+                        <div key={i} className="bg-white border border-slate-200 p-3 rounded-lg">
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">{stat.label}</div>
+                            <div className="text-lg font-black text-slate-900">{stat.val}</div>
+                        </div>
+                    ))}
                 </div>
-            )}
-        </section>
+            </div>
+        </div>
 
-        {/* --- TRUST SIGNALS --- */}
-        <section className="py-12 border-t border-slate-200/60">
-           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[
-                  { icon: ShieldCheck, title: "CRB Certified", desc: "Regulated Partner" },
-                  { icon: Users, title: "50,000+", desc: "Active Users" },
-                  { icon: Clock, title: "Instant", desc: "24/7 Processing" },
-                  { icon: Star, title: "4.9/5", desc: "Customer Rating" },
-              ].map((badge, i) => (
-                  <div key={i} className="flex flex-col items-center text-center p-6 rounded-2xl bg-white border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                      <div className="h-12 w-12 rounded-full bg-slate-50 flex items-center justify-center text-slate-900 mb-3">
-                          <badge.icon className="w-6 h-6" />
-                      </div>
-                      <div className="font-bold text-slate-900 text-sm mb-1">{badge.title}</div>
-                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{badge.desc}</div>
-                  </div>
-              ))}
-           </div>
+        {/* --- LIVE TABLE SECTION --- */}
+        <section className="mt-16 pt-8 border-t border-slate-200">
+            <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-4">Live Transaction Feed</h3>
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase">
+                            <tr>
+                                <th className="px-4 py-3">Time</th>
+                                <th className="px-4 py-3">Type</th>
+                                <th className="px-4 py-3">Amount</th>
+                                <th className="px-4 py-3">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-mono text-xs">
+                            {[
+                                { time: 'Just now', type: 'Loan', amt: 'KES 8,500', status: 'PAID' },
+                                { time: '1 min ago', type: 'Boost', amt: 'KES 45,000', status: 'ACTIVE' },
+                                { time: '2 mins ago', type: 'Loan', amt: 'KES 3,500', status: 'PAID' },
+                                { time: '4 mins ago', type: 'Boost', amt: 'KES 12,000', status: 'ACTIVE' },
+                            ].map((row, i) => (
+                                <tr key={i}>
+                                    <td className="px-4 py-3 text-slate-500">{row.time}</td>
+                                    <td className="px-4 py-3 font-bold text-slate-700">{row.type}</td>
+                                    <td className="px-4 py-3 font-black text-slate-900">{row.amt}</td>
+                                    <td className="px-4 py-3">
+                                        <span className="inline-flex items-center gap-1 text-[9px] font-bold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded border border-emerald-100">
+                                            <Check className="w-2 h-2" /> {row.status}
+                                        </span>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </section>
 
       </main>
 
       {/* --- FOOTER --- */}
-      <footer className="bg-white border-t border-slate-200 pt-12 pb-12 mt-8">
-        <div className="container mx-auto px-4 max-w-5xl">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-10">
-            <div className="col-span-2 pr-8">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="h-8 w-8 bg-slate-900 rounded-xl flex items-center justify-center">
-                    <Zap className="h-4 w-4 text-white" />
-                  </div>
-                  <span className="text-xl font-black text-slate-900">FulizaBoost</span>
-                </div>
-                <p className="text-xs text-slate-500 font-medium leading-relaxed max-w-xs">
-                  The #1 Financial Algorithmic Tool in Kenya. Unlock the true potential of your mobile money profile.
+      <footer className="bg-slate-900 text-slate-400 py-12 text-xs">
+        <div className="container mx-auto px-4 max-w-5xl grid md:grid-cols-4 gap-8">
+            <div className="col-span-2">
+                <div className="text-white font-black text-lg mb-2 uppercase tracking-tight">Flux Loans</div>
+                <p className="max-w-xs leading-relaxed opacity-70">
+                    Advanced algorithmic financial tools for the modern Kenyan economy. Unlocking liquidity through data.
                 </p>
             </div>
-            
-            <div className="space-y-4">
-               <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wide">Legal</h4>
-               <ul className="space-y-3 text-xs text-slate-500 font-medium">
-                 <li><Link href="/legal" className="hover:text-blue-600 transition-colors">Privacy Policy</Link></li>
-                 <li><Link href="/legal" className="hover:text-blue-600 transition-colors">Terms of Service</Link></li>
-               </ul>
+            <div>
+                <h4 className="font-bold text-white uppercase mb-4">Platform</h4>
+                <ul className="space-y-2">
+                    <li><Link href="/fuliza" className="hover:text-white">Fuliza Optimizer</Link></li>
+                    <li><Link href="/quick-loans" className="hover:text-white">Quick Loans</Link></li>
+                    <li><Link href="/quick-loans/track" className="hover:text-white">Track Application</Link></li>
+                </ul>
             </div>
-
-            <div className="space-y-4">
-               <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wide">Support</h4>
-               <ul className="space-y-3 text-xs text-slate-500 font-medium">
-                 <li><Link href="/contact" className="hover:text-blue-600 transition-colors">Help Center</Link></li>
-                 <li><Link href="/contact" className="hover:text-blue-600 transition-colors">Contact Us</Link></li>
-               </ul>
+            <div>
+                <h4 className="font-bold text-white uppercase mb-4">Legal</h4>
+                <ul className="space-y-2">
+                    <li><Link href="#" className="hover:text-white">Terms of Service</Link></li>
+                    <li><Link href="#" className="hover:text-white">Privacy Policy</Link></li>
+                    <li><Link href="#" className="hover:text-white">CRB Disclosure</Link></li>
+                </ul>
             </div>
-          </div>
-          
-          <div className="pt-8 border-t border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
-              <p className="text-[10px] text-slate-400 font-bold">&copy; 2026 FulizaBoost Analytics Ltd.</p>
-          </div>
         </div>
       </footer>
     </div>

