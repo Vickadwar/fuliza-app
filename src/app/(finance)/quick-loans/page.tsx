@@ -5,7 +5,8 @@ import {
   ShieldCheck, Lock, Smartphone, CheckCircle2, AlertCircle, Loader2, 
   UserCheck, CreditCard, ChevronRight, Zap, RefreshCw, EyeOff, 
   MessageSquare, XCircle, ArrowLeft, FileText, 
-  Banknote, Info, Copy, Check, CalendarDays, Wallet, Fingerprint, Unlock, ArrowRight
+  Banknote, Info, Copy, Check, CalendarDays, Wallet, Fingerprint, 
+  Unlock, ArrowRight, MapPin, Clock, TrendingUp
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { validateEntry, generateSmartOTP, generateTrackingId } from '@/lib/loan-engine';
@@ -18,11 +19,13 @@ const SAFE_LIMIT_CAP = 15000;
 const DIRECT_PATH_LIMIT = 5000; 
 const INTEREST_RATE = 0.15; 
 
-const SOCIAL_DATA = [
-  { name: "Peter Mwangi", loc: "Kiambu", amount: "15,000" },
-  { name: "Sarah Otieno", loc: "Kisumu", amount: "7,500" },
-  { name: "Grace Njeri", loc: "Nairobi", amount: "12,000" },
-  { name: "Brian Kipkorir", loc: "Eldoret", amount: "5,000" }
+// Updated Stream Data for Loans
+const LOAN_STREAM_DATA = [
+  { name: "Peter Mwangi", loc: "Kiambu", amount: "15,000", label: "Business" },
+  { name: "Sarah Otieno", loc: "Kisumu", amount: "7,500", label: "Emergency" },
+  { name: "Grace Njeri", loc: "Nairobi", amount: "12,000", label: "School Fees" },
+  { name: "Brian Kipkorir", loc: "Eldoret", amount: "5,000", label: "Stock" },
+  { name: "David Kamau", loc: "Nakuru", amount: "25,000", label: "Business" },
 ];
 
 const STANDARD_TIERS = [
@@ -31,38 +34,94 @@ const STANDARD_TIERS = [
   { amount: 3500, fee: 100, label: 'Bronze Start', days: 30 },
 ];
 
-// --- COMPONENTS ---
+// --- HELPER COMPONENTS ---
+
 const NavBar = ({ canGoBack, onBack }: { canGoBack?: boolean, onBack?: () => void }) => (
   <div className="bg-slate-900 text-white p-3 flex justify-between items-center shadow-md sticky top-0 z-50 h-[52px]">
     <div className="flex items-center gap-3">
       {canGoBack ? <button onClick={onBack}><ArrowLeft className="w-5 h-5" /></button> : <div className="p-1 bg-emerald-500 rounded"><Zap className="w-4 h-4 text-white fill-current" /></div>}
-      <span className="font-bold tracking-tight text-sm">Jatelo Loans</span>
+      <span className="font-bold tracking-tight text-sm">FluxxLoans</span>
     </div>
     <div className="flex gap-4 text-[10px] font-bold uppercase tracking-wide opacity-80">
       <Link href="/quick-loans/track" className="hover:text-emerald-400">Track</Link>
-      <Link href="/quick-loans/chat" className="hover:text-emerald-400">Help</Link>
     </div>
   </div>
 );
 
-const SocialTicker = () => {
-  const [idx, setIdx] = useState(0);
-  const [visible, setVisible] = useState(false);
+// New: Floating Stream (Like Fuliza Page)
+const SmartLoanStream = () => {
+  const [popup, setPopup] = useState({ visible: false, data: LOAN_STREAM_DATA[0] });
+
+  const getTodayDate = () => {
+    return new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  };
+
   useEffect(() => {
-    const timer = setInterval(() => { setVisible(true); setIdx(prev => (prev + 1) % SOCIAL_DATA.length); setTimeout(() => setVisible(false), 4000); }, 8000);
-    return () => clearInterval(timer);
+    let index = 0;
+    const interval = setInterval(() => {
+      // Hide
+      setPopup(prev => ({ ...prev, visible: false }));
+      // Update & Show after delay
+      setTimeout(() => {
+        index = (index + 1) % LOAN_STREAM_DATA.length;
+        setPopup({ visible: true, data: LOAN_STREAM_DATA[index] });
+      }, 500);
+    }, 6000); // 6 Seconds cycle
+
+    // Initial show
+    setTimeout(() => setPopup(prev => ({ ...prev, visible: true })), 1000);
+    return () => clearInterval(interval);
   }, []);
-  const person = SOCIAL_DATA[idx];
+
   return (
-    <div className={`fixed bottom-6 left-4 right-4 z-40 transition-all duration-500 transform ${visible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
-      <div className="bg-slate-800/95 backdrop-blur text-white p-3 rounded-xl shadow-2xl border-l-4 border-emerald-500 flex items-center gap-3">
-        <div className="bg-emerald-500/20 p-2 rounded-full"><Banknote className="w-4 h-4 text-emerald-400" /></div>
-        <div className="text-xs"><p className="font-bold text-white mb-0.5">{person.name} <span className="text-slate-400 font-normal">({person.loc})</span></p><p className="text-emerald-400">Received: <span className="font-bold text-white">KES {person.amount}</span></p></div>
+    <div className={`fixed bottom-4 left-4 right-20 md:left-4 md:right-auto md:w-80 z-40 transition-all duration-500 transform ${popup.visible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
+      <div className="bg-white rounded-lg shadow-xl border-l-4 border-blue-600 p-3 flex items-center gap-3 ring-1 ring-black/5">
+        <div className="bg-blue-100 rounded-full p-2 shrink-0">
+           <Banknote className="w-5 h-5 text-blue-600" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex justify-between items-center">
+            <p className="text-xs font-bold text-slate-800 truncate">{popup.data.name}</p>
+            <p className="text-[10px] text-slate-400 flex items-center gap-1">
+               <Clock className="w-3 h-3" /> Just Now
+            </p>
+          </div>
+          <p className="text-[10px] text-slate-500 truncate flex items-center gap-1 mb-1">
+             <MapPin className="w-3 h-3" /> {popup.data.loc}
+          </p>
+          <div className="flex items-center gap-2 text-[10px]">
+            <span className="text-slate-400">{popup.data.label}</span>
+            <ArrowRight className="w-3 h-3 text-emerald-500" />
+            <span className="font-black text-emerald-700 bg-emerald-50 px-1 rounded">KES {popup.data.amount}</span>
+          </div>
+        </div>
+      </div>
+      <div className="text-[9px] text-left ml-1 text-slate-400 mt-1 font-medium">
+         Live Disbursements • {getTodayDate()}
       </div>
     </div>
   );
 };
 
+// New: Floating Chat FAB (Linked to Quick Loans Chat)
+const FloatingChatFab = () => (
+  <Link href="/quick-loans/chat">
+    <div className="fixed bottom-6 right-4 z-50 animate-in zoom-in slide-in-from-bottom-10 duration-700">
+      <div className="absolute -top-2 -right-1 flex h-4 w-4">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+        <span className="relative inline-flex rounded-full h-4 w-4 bg-red-500 text-[8px] text-white items-center justify-center font-bold">1</span>
+      </div>
+      <button className="bg-blue-900 hover:bg-blue-800 text-white p-4 rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center border-2 border-white/20">
+        <MessageSquare className="w-6 h-6" />
+      </button>
+      <div className="text-[10px] font-bold text-center mt-1 text-slate-500 bg-white/80 backdrop-blur px-2 py-0.5 rounded-full shadow-sm">
+        Support
+      </div>
+    </div>
+  </Link>
+);
+
+// --- MAIN PAGE COMPONENT ---
 export default function QuickLoanPage() {
   const [step, setStep] = useState('entry');
   
@@ -87,22 +146,16 @@ export default function QuickLoanPage() {
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const hesitationTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // --- 1. ABANDONMENT LOGIC (HESITATION TIMER) ---
+  // --- 1. ABANDONMENT LOGIC ---
   useEffect(() => {
-    // Clear any existing timer when step changes
     if (hesitationTimerRef.current) clearTimeout(hesitationTimerRef.current);
-
-    // Only set timer on the "Summary" (Payment Prep) screen
     if (step === 'summary' && selectedOffer) {
         hesitationTimerRef.current = setTimeout(() => {
-            // Trigger SMS if they sit here for 2 minutes
             sendAbandonmentSMS(formData.phone, selectedOffer.amount.toLocaleString(), 'LOAN');
-        }, 120000); // 2 Minutes
+        }, 120000); 
     }
-
     return () => { if (hesitationTimerRef.current) clearTimeout(hesitationTimerRef.current); };
   }, [step, selectedOffer, formData.phone]);
-
 
   // --- 2. CALCULATIONS ---
   const calculateFee = (amount: number) => {
@@ -119,7 +172,7 @@ export default function QuickLoanPage() {
     };
   };
 
-  // --- 3. INPUT HANDLERS (STRICT) ---
+  // --- 3. INPUT HANDLERS ---
   const handlePhone = (e: React.ChangeEvent<HTMLInputElement>) => setFormData(p => ({ ...p, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }));
   const handleID = (e: React.ChangeEvent<HTMLInputElement>) => setFormData(p => ({ ...p, idNumber: e.target.value.replace(/\D/g, '').slice(0, 8) }));
   const handleAmount = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -179,13 +232,11 @@ export default function QuickLoanPage() {
 
   // --- 5. PAYMENT HANDLER ---
   const handleActivateLoan = async () => {
-    // Clear hesitation timer immediately
     if (hesitationTimerRef.current) clearTimeout(hesitationTimerRef.current);
 
     setStep('connecting');
     setConnectStatus('Initializing Secure Handshake...');
     
-    // Simulate connection steps
     setTimeout(() => setConnectStatus('Contacting Safaricom M-Pesa...'), 1500);
     setTimeout(() => setConnectStatus('Requesting Authorization...'), 3000);
     
@@ -260,9 +311,12 @@ export default function QuickLoanPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-20 pt-[60px]">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-20 pt-[60px] relative overflow-x-hidden">
       <NavBar canGoBack={step !== 'entry' && step !== 'receipt'} onBack={() => setStep('entry')} />
-      <SocialTicker />
+      
+      {/* NEW FLOATING ELEMENTS */}
+      <SmartLoanStream />
+      <FloatingChatFab />
 
       {/* 1. ENTRY */}
       {step === 'entry' && (

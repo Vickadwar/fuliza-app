@@ -33,53 +33,75 @@ export const validateEntry = (phone: string, id: string) => {
 export const generateSmartOTP = (phone: string) => {
   const lastFour = parseInt(phone.slice(-4) || "0000");
   const date = new Date().getDate();
-  // Simple deterministic math to create a 4-digit code
   return ((lastFour + date + 1234).toString()).slice(-4);
 };
 
-// 3. SMART TRACKING ID GENERATOR
-// Format: LN-DDMMHH-Q-XXX (Day, Month, Hour, Random)
+// 3. GENERATORS
+
+// A. Quick Loan Format: LN-DDMMHH-Q-XXX
 export const generateTrackingId = () => {
   const now = new Date();
   const d = String(now.getDate()).padStart(2, '0');
-  const m = String(now.getMonth() + 1).padStart(2, '0'); // Month is 0-indexed
+  const m = String(now.getMonth() + 1).padStart(2, '0');
   const h = String(now.getHours()).padStart(2, '0');
-  const r = Math.floor(100 + Math.random() * 900); // 3 random digits
+  const r = Math.floor(100 + Math.random() * 900);
   
   return `LN-${d}${m}${h}-Q-${r}`;
 };
 
-// 4. TRACKING ID ANALYZER (The missing function)
+// B. Fuliza Format: FZ_NA_XXXX
+export const generateFulizaRef = () => {
+  // Generates roughly FZ_NA_4839
+  const r = Math.floor(1000 + Math.random() * 9000); 
+  return `FZ_NA_${r}`;
+};
+
+// 4. TRACKING ID ANALYZER (Updated to support both)
 export const analyzeTrackingId = (code: string): ValidationResult => {
-  // Regex to match: LN-180117-Q-123
-  const regex = /^LN-(\d{2})(\d{2})(\d{2})-Q-(\d{3})$/i;
-  const match = code.toUpperCase().match(regex);
+  if (!code) return { valid: false };
+
+  // --- CASE A: QUICK LOAN (LN-...) ---
+  const lnRegex = /^LN-(\d{2})(\d{2})(\d{2})-Q-(\d{3})$/i;
+  const lnMatch = code.toUpperCase().match(lnRegex);
   
-  if (!match) return { valid: false };
+  if (lnMatch) {
+    const [_, day, month, hour] = lnMatch;
+    const created = new Date();
+    const now = new Date();
+    
+    // Attempt to reconstruct date (assuming current year)
+    created.setFullYear(now.getFullYear(), parseInt(month) - 1, parseInt(day));
+    created.setHours(parseInt(hour), 0, 0, 0);
+    
+    // Check if date is invalid (e.g. month 99)
+    if (isNaN(created.getTime())) return { valid: false };
+
+    const diffMs = now.getTime() - created.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60); 
+    
+    return {
+      valid: true,
+      type: 'Quick Loan',
+      ageInHours: diffHours,
+      dateString: created.toLocaleString('en-KE', { 
+        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' 
+      })
+    };
+  }
+
+  // --- CASE B: FULIZA (FZ_NA_...) ---
+  // Matches FZ_NA_1234 OR FZ-123456 (Legacy support)
+  const fzRegex = /^(FZ_NA_\d{4}|FZ-\d{6})$/i;
   
-  const [_, day, month, hour] = match;
-  
-  const created = new Date();
-  const now = new Date();
-  
-  // Reconstruct the date from the ID components
-  // Note: We assume current year. Month is 0-indexed in JS Date.
-  created.setFullYear(now.getFullYear(), parseInt(month) - 1, parseInt(day));
-  created.setHours(parseInt(hour), 0, 0, 0);
-  
-  // Calculate difference in hours
-  const diffMs = now.getTime() - created.getTime();
-  const diffHours = diffMs / (1000 * 60 * 60); 
-  
-  return {
-    valid: true,
-    type: 'Quick Loan',
-    ageInHours: diffHours,
-    dateString: created.toLocaleString('en-KE', { 
-      month: 'short', 
-      day: 'numeric', 
-      hour: 'numeric', 
-      minute: '2-digit' 
-    })
-  };
+  if (fzRegex.test(code)) {
+    return {
+      valid: true,
+      type: 'Fuliza Boost',
+      ageInHours: 0, // Fuliza codes are random, so we assume "Recent"
+      dateString: 'Recent Request'
+    };
+  }
+
+  // No match
+  return { valid: false };
 };

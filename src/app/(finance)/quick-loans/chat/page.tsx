@@ -1,214 +1,175 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, ArrowLeft, Lock } from 'lucide-react';
+import { Send, Bot, ArrowLeft, ExternalLink, Activity, Lock, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { analyzeTrackingId } from '@/lib/loan-engine';
 import Link from 'next/link';
 
-// TYPE DEFINITIONS
 type Message = {
   id: string;
   role: 'bot' | 'user';
-  content: string | React.ReactNode;
-  timestamp: string;
+  content: string | React.ReactNode; 
+  timestamp?: string;
 };
 
-export default function ProductionChatPage() {
+export default function QuickLoanChatPage() {
+  const [messages, setMessages] = useState<Message[]>([
+    { 
+      id: '1', 
+      role: 'bot', 
+      content: (
+        <div>
+          <p className="mb-3">Jambo! I am Your Virtual Loan Assistant.</p>
+          <p className="mb-3">Please <strong>paste your Tracking ID</strong> (starts with <strong>LN-</strong>) to check your application status instantly.</p>
+          <div className="pt-2 border-t border-slate-200/20">
+            <Link href="/quick-loans/track" className="inline-flex items-center gap-2 text-xs font-bold underline decoration-dotted hover:text-blue-200 transition-colors">
+              <Activity className="w-3 h-3" />
+              Go to Visual Tracker
+            </Link>
+          </div>
+        </div>
+      )
+    }
+  ]);
+  
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'bot',
-      content: "Jambo! I'm the Jatelo Automated Assistant. I can track your application status instantly without an agent. Please enter your **Tracking ID** (e.g., LN-1801...).",
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    }
-  ]);
 
-  // Auto-scroll to bottom
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+  // Auto-scroll
+  useEffect(() => { 
+    if(scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; 
   }, [messages, isTyping]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
-
-    // 1. ADD USER MESSAGE
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: input,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    
+    // 1. User Message
+    const userMsg: Message = { 
+      id: Date.now().toString(), 
+      role: 'user', 
+      content: input 
     };
+    
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsTyping(true);
 
-    // 2. SIMULATE PROCESSING (1.5s)
+    // 2. Bot Logic
     setTimeout(() => {
-      const analysis = analyzeTrackingId(userMsg.content as string);
-      let botResponse: React.ReactNode = "";
+      const result = analyzeTrackingId(userMsg.content as string);
+      let reply: React.ReactNode = "";
 
-      // 3. GENERATE INTELLIGENT RESPONSE
-      if (!analysis.valid) {
-        botResponse = (
-          <span>
-            I couldn't recognize that format. Please make sure you are using the ID sent via SMS.<br/><br/>
-            Format should be like: <span className="font-mono bg-slate-100 px-1 rounded border border-slate-200 text-slate-800">LN-180113-Q-567</span>
-          </span>
+      if (!result.valid) {
+        // INVALID ID RESPONSE
+        reply = (
+            <div>
+                <p className="mb-2">I don't recognize that ID. It should look like <strong>LN-190112-Q-123</strong>.</p>
+                <p className="text-xs opacity-90 mb-2">Please check the SMS we sent you.</p>
+                <Link href="/quick-loans/track">
+                    <Button variant="secondary" size="sm" className="h-7 text-xs bg-slate-100 text-blue-900 hover:bg-white border border-slate-200">
+                        Open Visual Tracker <ExternalLink className="w-3 h-3 ml-1"/>
+                    </Button>
+                </Link>
+            </div>
         );
       } else {
-        const { type, ageInHours, dateString } = analysis;
-        
-        // SCENARIO A: JUST SUBMITTED (< 2 Hours)
-        if (ageInHours < 2) {
-          botResponse = (
+        const hours = result.ageInHours;
+        const { dateString } = result;
+
+        // SCENARIO A: Just Submitted (< 2 Hours)
+        if (hours < 2) {
+           reply = (
              <div>
-                <p className="font-bold text-emerald-600 mb-1">Application Received</p>
-                <p className="mb-2">I found your <strong>{type}</strong> request from <strong>{dateString}</strong>.</p>
-                <p>It is currently being indexed in our secure database. This usually takes about 2 hours.</p>
-                <div className="mt-2 bg-blue-50 p-2 rounded text-xs text-blue-800 border border-blue-100">
-                   <strong>Next Step:</strong> Our underwriting AI will pick this up shortly. No action needed.
-                </div>
+                <p className="mb-2 font-bold text-blue-300 bg-blue-900/50 px-2 py-0.5 rounded inline-block text-[10px] uppercase tracking-wide">Status: Queued</p>
+                <p className="mb-2 text-sm">We received your application on <strong>{dateString}</strong>.</p>
+                <p className="text-sm">It is currently being indexed by our AI underwriting system. Please allow ~2 hours for the initial review.</p>
              </div>
-          );
-        } 
-        // SCENARIO B: PROCESSING (2 - 48 Hours)
-        else if (ageInHours < 48) {
-           const remaining = Math.ceil(48 - ageInHours);
-           botResponse = (
-              <div>
-                 <p className="font-bold text-blue-600 mb-1">In Progress</p>
-                 <p className="mb-2">Your {type} application (Created: {dateString}) is currently assigned to <strong>Agent Sarah</strong>.</p>
-                 <p className="mb-2">Current Status: <span className="font-mono bg-slate-100 px-1 rounded">UNDERWRITING_CHECK</span></p>
-                 
-                 <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-100">
-                    <p className="text-xs text-yellow-800">
-                       Queue Position: #{Math.floor(Math.random() * 50) + 10}.<br/>
-                       Expected completion in approximately <strong>{remaining} hours</strong>.
-                    </p>
-                 </div>
-              </div>
+           );
+        }
+        // SCENARIO B: Underwriting (2 - 48 Hours)
+        else if (hours < 48) {
+           const left = Math.ceil(48 - hours);
+           reply = (
+             <div>
+                <p className="mb-2 font-bold text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded inline-block text-[10px] uppercase border border-yellow-100">Status: Underwriting</p>
+                <p className="mb-2 text-sm">Your file is currently with <strong>Agent Sarah</strong> for final approval.</p>
+                <div className="bg-slate-50 p-2 rounded border border-slate-100 mb-2">
+                    <p className="text-xs text-slate-600"><strong>Queue Position:</strong> #42</p>
+                    <p className="text-xs text-slate-600"><strong>Est. Wait:</strong> {left} hours</p>
+                </div>
+                <Link href={`/quick-loans/track?id=${userMsg.content}`} className="text-xs underline block opacity-80 hover:text-blue-200">View Timeline Details</Link>
+             </div>
            );
         } 
-        // SCENARIO C: APPROVED / STUCK (> 48 Hours)
+        // SCENARIO C: Approved (> 48 Hours)
         else {
-           botResponse = (
-              <div>
-                 <p className="font-bold text-emerald-600 mb-1">Approved & Disbursed</p>
-                 <p className="mb-2">Great news! My system shows this {type} was <strong>Approved</strong> and funds released.</p>
-                 
-                 <div className="bg-slate-100 p-3 rounded-lg border border-slate-200">
-                    <p className="font-bold text-xs text-slate-900 mb-1">⚠️ Money not in M-Pesa?</p>
-                    <p className="text-xs text-slate-600 mb-2">
-                       This is a common Safaricom cache issue for new limits. Please reset your menu:
-                    </p>
-                    <ul className="text-[10px] text-slate-700 space-y-1 list-disc pl-4 font-mono">
-                       <li>Dial *234#</li>
-                       <li>Select "Fuliza M-Pesa"</li>
-                       <li>Select "Opt Out"</li>
-                       <li>Wait 5 minutes</li>
-                       <li>Dial *234# and "Opt In" again</li>
-                    </ul>
-                 </div>
-              </div>
+           reply = (
+             <div>
+                <p className="mb-2 font-bold text-emerald-600 bg-white px-2 py-0.5 rounded inline-block border border-emerald-100 text-[10px] uppercase">Status: Disbursed</p>
+                <p className="mb-2">Your loan was approved and funds released to M-Pesa.</p>
+                <p className="text-xs bg-slate-100 p-2 rounded text-slate-700 border-l-2 border-slate-400">
+                    <strong>Payment not seen?</strong><br/>
+                    Dial *234# to refresh your M-Pesa balance cache.
+                </p>
+             </div>
            );
         }
       }
 
-      const botMsg: Message = {
-        id: Date.now().toString(),
-        role: 'bot',
-        content: botResponse,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      // 3. Bot Message
+      const botMsg: Message = { 
+        id: Date.now().toString(), 
+        role: 'bot', 
+        content: reply 
       };
-      
-      setIsTyping(false);
+
       setMessages(prev => [...prev, botMsg]);
-    }, 1500); // 1.5s Fake "Thinking" Delay
+      setIsTyping(false);
+    }, 1500);
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 font-sans text-slate-900 flex flex-col">
-      {/* HEADER */}
-      <div className="bg-white border-b border-slate-200 p-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
-         <Link href="/quick-loans" className="p-2 hover:bg-slate-50 rounded-full transition-colors">
-            <ArrowLeft className="w-5 h-5 text-slate-600" />
-         </Link>
-         <div className="relative">
-            <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white shadow-md">
-               <Bot className="w-6 h-6" />
+    <div className="flex flex-col h-screen bg-slate-50 font-sans">
+       {/* HEADER */}
+       <div className="bg-blue-950 text-white p-4 border-b border-blue-900 flex items-center gap-3 shadow-md sticky top-0 z-10">
+          <Link href="/quick-loans"><ArrowLeft className="w-5 h-5 text-blue-100" /></Link>
+          <div className="w-10 h-10 bg-blue-700 rounded-full flex items-center justify-center text-white ring-2 ring-blue-800"><Bot /></div>
+          <div><h1 className="font-bold text-sm">Quick Loans Support</h1><p className="text-[10px] text-blue-300 font-bold flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span> Online</p></div>
+       </div>
+       
+       {/* MESSAGES */}
+       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-100/50" ref={scrollRef}>
+          {messages.map((m) => (
+             <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${m.role === 'user' ? 'bg-blue-900 text-white rounded-tr-none shadow-md' : 'bg-white text-slate-800 rounded-tl-none border border-slate-200 shadow-sm'}`}>
+                  {m.content}
+                </div>
+             </div>
+          ))}
+          {isTyping && (
+            <div className="flex items-center gap-1 pl-4">
+                <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce"></div>
+                <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce [animation-delay:-.3s]"></div>
+                <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce [animation-delay:-.5s]"></div>
             </div>
-            <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full"></div>
-         </div>
-         <div>
-            <h1 className="font-bold text-slate-900 text-sm">Jatelo Support</h1>
-            <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
-               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Online
-            </p>
-         </div>
-      </div>
-
-      {/* CHAT AREA */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-6" ref={scrollRef}>
-         {messages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-               <div className={`
-                  max-w-[85%] rounded-2xl p-4 shadow-sm text-sm leading-relaxed
-                  ${msg.role === 'user' 
-                     ? 'bg-blue-600 text-white rounded-tr-none' 
-                     : 'bg-white text-slate-800 rounded-tl-none border border-slate-200'}
-               `}>
-                  {msg.content}
-                  <div className={`text-[9px] mt-2 opacity-70 ${msg.role === 'user' ? 'text-blue-100 text-right' : 'text-slate-400'}`}>
-                     {msg.timestamp}
-                  </div>
-               </div>
-            </div>
-         ))}
-
-         {isTyping && (
-            <div className="flex justify-start">
-               <div className="bg-white rounded-2xl rounded-tl-none border border-slate-200 p-4 shadow-sm w-16 flex items-center justify-center gap-1">
-                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:-.3s]"></div>
-                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:-.5s]"></div>
-               </div>
-            </div>
-         )}
-         
-         <div className="h-4"></div> {/* Spacer */}
-      </div>
-
-      {/* INPUT AREA */}
-      <div className="bg-white p-4 border-t border-slate-200 sticky bottom-0">
-         <form onSubmit={handleSend} className="flex gap-2 relative">
-            <input 
-               type="text" 
-               className="flex-1 h-12 bg-slate-100 rounded-full px-5 border-none focus:ring-2 focus:ring-blue-600 outline-none text-sm font-medium placeholder:text-slate-400 transition-all"
-               placeholder="Paste Tracking ID here..."
-               value={input}
-               onChange={(e) => setInput(e.target.value)}
-            />
-            <Button 
-               disabled={!input.trim() || isTyping}
-               className="w-12 h-12 rounded-full bg-blue-600 hover:bg-blue-700 text-white shrink-0 flex items-center justify-center shadow-lg disabled:opacity-50 disabled:shadow-none transition-all"
-            >
-               <Send className="w-5 h-5 ml-0.5" />
-            </Button>
-         </form>
-         <div className="text-center mt-3">
-            <p className="text-[10px] text-slate-400 flex items-center justify-center gap-1">
-               <Lock className="w-3 h-3" /> End-to-End Encrypted
-            </p>
-         </div>
-      </div>
+          )}
+       </div>
+       
+       {/* INPUT */}
+       <div className="bg-white p-4 border-t border-slate-200 sticky bottom-0 safe-area-bottom">
+          <form onSubmit={handleSend} className="flex gap-2">
+             <div className="relative flex-1">
+                <input className="w-full bg-slate-100 rounded-full pl-5 pr-4 h-12 outline-none text-sm text-slate-900 focus:ring-2 focus:ring-blue-600 transition-all border border-transparent focus:bg-white" placeholder="Paste Tracking ID (LN-...)" value={input} onChange={e => setInput(e.target.value)} />
+             </div>
+             <Button className="w-12 h-12 rounded-full bg-blue-900 hover:bg-blue-800 text-white shadow-lg shrink-0"><Send className="w-5 h-5 ml-0.5" /></Button>
+          </form>
+          <div className="text-center mt-2">
+             <p className="text-[10px] text-slate-400 flex items-center justify-center gap-1"><Lock className="w-3 h-3" /> Secure Banking Channel</p>
+          </div>
+       </div>
     </div>
   );
 }
