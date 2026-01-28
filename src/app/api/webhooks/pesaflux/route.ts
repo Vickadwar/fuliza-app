@@ -1,75 +1,50 @@
 import { NextResponse } from 'next/server';
-import { sendSuccessSMS } from '@/app/actions/sms';
-import { generateTrackingId } from '@/lib/loan-engine';
+import { sendFulizaSuccessSMS } from '@/app/actions/sms'; // <--- UPDATED IMPORT
 import { getRedisClient } from '@/lib/redis';
-import { sendFluxSMS } from '@/lib/flux-client';
 
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   try {
-    const data = await request.json();
-    console.log("[Webhook Received]", JSON.stringify(data, null, 2));
+    const payload = await req.json();
 
-    // 1. SAFE EXTRACTION (Handle PesaFlux naming conventions)
-    // IMPORTANT: 'TransactionID' in Webhook matches 'transaction_request_id' from Initiation
-    const requestID = data.TransactionID || data.MerchantRequestID; 
-    const responseCode = data.ResponseCode; // 0 = Success
-    const msisdn = data.Msisdn;
-    const amount = data.TransactionAmount;
-    const receipt = data.TransactionReceipt;
+    console.log("[WEBHOOK] Received:", JSON.stringify(payload));
 
-    if (!requestID) {
-      return NextResponse.json({ status: "error", message: "Missing TransactionID" }, { status: 400 });
-    }
-
-    const redis = await getRedisClient();
-
-    // 2. FIND THE CONTEXT (Using the SOFTPID)
-    const redisKey = `pay:${requestID}`;
-    const existingStr = await redis.get(redisKey);
-    
-    // If not found, log it (It might be an orphaned transaction or ID mismatch)
-    if (!existingStr) {
-        console.error(`[Webhook] No Redis context found for ID: ${requestID}`);
-        return NextResponse.json({ status: "ignored" });
-    }
-
-    const existing = JSON.parse(existingStr as string);
-    const serviceType = existing.serviceType === 'FULIZA_BOOST' ? 'FULIZA' : 'LOAN';
-
-    if (responseCode == 0) {
-        // --- SUCCESS ---
-        const trackId = generateTrackingId();
-
-        // Update Redis so the frontend polling loop sees 'COMPLETED'
-        await redis.set(redisKey, JSON.stringify({
-            ...existing,
-            status: 'COMPLETED',
-            mpesaCode: receipt,
-            trackId: trackId,
-        }), { EX: 3600 });
-
-        // Send Custom Success SMS
-        await sendSuccessSMS(msisdn, amount, trackId, serviceType);
-        console.log(`[Webhook] Success processed for ${requestID}`);
-
-    } else {
-        // --- FAILED / CANCELLED ---
-        await redis.set(redisKey, JSON.stringify({
-            ...existing,
-            status: 'FAILED',
-            reason: data.ResponseDescription || 'CANCELLED'
-        }), { EX: 600 });
+    // Pesaflux Success Check
+    // They send "ResponseCode": 0 for success via webhook callback
+    if (payload.ResponseCode === 0 || payload.ResultCode === "0") {
+      const redis = await getRedisClient();
+      // Pesaflux sends "TransactionID" (SOFTPID...) in the webhook which matches our tracking ID
+      const redisKey = `pay:${payload.TransactionID}`;
+      
+      const cachedData = await redis.get(redisKey);
+      
+      if (cachedData) {
+        let localRecord = JSON.parse(cachedData);
         
-        console.log(`[Webhook] Failure/Cancel processed for ${requestID}`);
-
-        // Send Failure Nudge (Optional)
-        const failMsg = `Dear Customer, the transaction was cancelled. To activate your ${serviceType === 'FULIZA' ? 'Fuliza Boost' : 'Quick Loan'}, please retry the payment on the website.`;
-        await sendFluxSMS(msisdn, failMsg);
+        // Only process if not already completed
+        if (localRecord.status !== 'COMPLETED') {
+           localRecord.status = 'COMPLETED';
+           localRecord.receipt = payload.TransactionReceipt;
+           
+           await redis.set(redisKey, JSON.stringify(localRecord), { EX: 3600 });
+           
+           // Send SMS if not already sent
+           if (!localRecord.smsSent) {
+             await sendFulizaSuccessSMS(
+               localRecord.phone, 
+               Number(localRecord.amount), 
+               payload.TransactionReceipt
+             );
+             
+             localRecord.smsSent = true;
+             await redis.set(redisKey, JSON.stringify(localRecord), { EX: 3600 });
+           }
+        }
+      }
     }
 
-    return NextResponse.json({ status: "success" });
+    return NextResponse.json({ received: true });
   } catch (error) {
-    console.error("[Webhook Error]", error);
-    return NextResponse.json({ status: "error" }, { status: 500 });
+    console.error("[WEBHOOK-ERROR]", error);
+    return NextResponse.json({ received: false }, { status: 500 });
   }
 }
