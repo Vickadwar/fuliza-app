@@ -18,9 +18,12 @@ export async function GET(req: Request) {
 
     let localRecord = JSON.parse(cachedData);
 
-    // If already completed locally, return
-    if (localRecord.status === 'COMPLETED') {
-        return NextResponse.json({ status: 'COMPLETED', trackId: localRecord.receipt || 'CONFIRMED' });
+    // If already final state, return immediately
+    if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(localRecord.status)) {
+        return NextResponse.json({ 
+            status: localRecord.status, 
+            trackId: localRecord.receipt 
+        });
     }
 
     // 2. Active Check to Pesaflux
@@ -38,23 +41,20 @@ export async function GET(req: Request) {
 
     const fluxData = await fluxRes.json();
     
-    // 3. Handle Success
+    // --- SCENARIO 1: SUCCESS ---
     if (fluxData.TransactionStatus === 'Completed') {
         localRecord.status = 'COMPLETED';
         localRecord.receipt = fluxData.TransactionReceipt;
         
-        // Save status to Redis (extend expiry)
         await redis.set(redisKey, JSON.stringify(localRecord), { EX: 3600 });
         
-        // 4. Send SMS (Once only)
+        // Send SMS
         if (!localRecord.smsSent) {
             await sendFulizaSuccessSMS(
               localRecord.phone, 
-              Number(localRecord.amount), // The Fee (e.g. 220)
+              Number(localRecord.amount),
               fluxData.TransactionReceipt
             );
-            
-            // Mark sent to avoid duplicates
             localRecord.smsSent = true;
             await redis.set(redisKey, JSON.stringify(localRecord), { EX: 3600 });
         }
@@ -62,20 +62,30 @@ export async function GET(req: Request) {
         return NextResponse.json({ status: 'COMPLETED', trackId: fluxData.TransactionReceipt });
     } 
     
-    // 4. Handle Cancelled/Failed
-    if (fluxData.ResultCode === "1032") {
-       localRecord.status = 'CANCELLED';
-       await redis.set(redisKey, JSON.stringify(localRecord), { EX: 600 });
-       return NextResponse.json({ status: 'CANCELLED' });
-    }
+    // --- SCENARIO 2: FAILED OR CANCELLED ---
+    // Pesaflux may return TransactionStatus: "Failed" 
+    // OR ResultCode: "1032" (Cancelled)
+    // OR ResultCode: "1" (Insufficient Funds)
     
-    if (fluxData.TransactionStatus === 'Failed') {
-       localRecord.status = 'FAILED';
+    const isFailed = fluxData.TransactionStatus === 'Failed' || 
+                     fluxData.ResultCode !== "0" && fluxData.ResultCode !== "200";
+
+    if (isFailed) {
+       // Check if it was specifically cancelled (ResultCode 1032 or "cancel" in desc)
+       const isCancelled = fluxData.ResultCode === "1032" || 
+                           (fluxData.ResultDesc && fluxData.ResultDesc.toLowerCase().includes('cancel'));
+       
+       const newStatus = isCancelled ? 'CANCELLED' : 'FAILED';
+       
+       localRecord.status = newStatus;
+       localRecord.reason = fluxData.ResultDesc || 'Transaction Failed';
+       
        await redis.set(redisKey, JSON.stringify(localRecord), { EX: 600 });
-       return NextResponse.json({ status: 'FAILED' });
+       
+       return NextResponse.json({ status: newStatus, reason: localRecord.reason });
     }
 
-    // Still Pending
+    // --- SCENARIO 3: STILL PENDING ---
     return NextResponse.json({ status: 'PENDING' });
 
   } catch (error) {
