@@ -17,15 +17,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: "Invalid Safaricom Number" }, { status: 400 });
     }
 
-    // Unique reference for the transaction
+    // Unique reference
     const reference = `FZ_${idNumber}_${Date.now().toString().slice(-4)}`;
+    
+    // Get your live domain for the callback
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
 
     const payload = {
       api_key: process.env.PESAFLUX_API_KEY,
       email: process.env.PESAFLUX_EMAIL,
       amount: String(amount),
       msisdn: formattedPhone,
-      reference: reference
+      reference: reference,
+      // Tell Pesaflux to hit our new webhook file
+      callback_url: `${baseUrl}/api/webhooks/pesaflux`
     };
 
     console.log(`[STK-INIT] Sending to PesaFlux: ${formattedPhone} | KES ${amount}`);
@@ -34,23 +39,23 @@ export async function POST(req: Request) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(15000) // 15s Timeout
+      signal: AbortSignal.timeout(15000)
     });
 
     const data = await response.json();
 
-    // Pesaflux Success Logic
     if (data.success === "200" || data.transaction_request_id) {
       const trackingId = data.transaction_request_id;
       
       const redis = await getRedisClient();
       
-      // Store initial state in Redis with 1 hour expiry
+      // Store initial state
       await redis.set(`pay:${trackingId}`, JSON.stringify({
         status: 'PENDING',
         phone: formattedPhone,
         amount: amount,
         reference: reference,
+        smsSent: false, // Track if SMS sent to avoid duplicates
         createdAt: Date.now()
       }), { EX: 3600 });
 

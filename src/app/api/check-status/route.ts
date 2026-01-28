@@ -12,13 +12,13 @@ export async function GET(req: Request) {
     const redis = await getRedisClient();
     const redisKey = `pay:${id}`;
     
-    // 1. Get Local State
+    // 1. Check Redis (Fastest)
     const cachedData = await redis.get(redisKey);
     if (!cachedData) return NextResponse.json({ status: 'FAILED' });
 
     let localRecord = JSON.parse(cachedData);
 
-    // If already final state, return immediately
+    // IF WEBHOOK HAS ALREADY UPDATED REDIS, RETURN THAT STATUS
     if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(localRecord.status)) {
         return NextResponse.json({ 
             status: localRecord.status, 
@@ -26,7 +26,7 @@ export async function GET(req: Request) {
         });
     }
 
-    // 2. Active Check to Pesaflux
+    // 2. If Redis is still PENDING, Ask Pesaflux directly
     const payload = {
       api_key: process.env.PESAFLUX_API_KEY,
       email: process.env.PESAFLUX_EMAIL,
@@ -41,11 +41,10 @@ export async function GET(req: Request) {
 
     const fluxData = await fluxRes.json();
     
-    // --- SCENARIO 1: SUCCESS ---
+    // Success Case
     if (fluxData.TransactionStatus === 'Completed') {
         localRecord.status = 'COMPLETED';
         localRecord.receipt = fluxData.TransactionReceipt;
-        
         await redis.set(redisKey, JSON.stringify(localRecord), { EX: 3600 });
         
         // Send SMS
@@ -62,34 +61,23 @@ export async function GET(req: Request) {
         return NextResponse.json({ status: 'COMPLETED', trackId: fluxData.TransactionReceipt });
     } 
     
-    // --- SCENARIO 2: FAILED OR CANCELLED ---
-    // Pesaflux may return TransactionStatus: "Failed" 
-    // OR ResultCode: "1032" (Cancelled)
-    // OR ResultCode: "1" (Insufficient Funds)
-    
-    const isFailed = fluxData.TransactionStatus === 'Failed' || 
-                     fluxData.ResultCode !== "0" && fluxData.ResultCode !== "200";
-
-    if (isFailed) {
-       // Check if it was specifically cancelled (ResultCode 1032 or "cancel" in desc)
-       const isCancelled = fluxData.ResultCode === "1032" || 
-                           (fluxData.ResultDesc && fluxData.ResultDesc.toLowerCase().includes('cancel'));
-       
-       const newStatus = isCancelled ? 'CANCELLED' : 'FAILED';
-       
-       localRecord.status = newStatus;
-       localRecord.reason = fluxData.ResultDesc || 'Transaction Failed';
-       
+    // Cancelled Case (Look for Code 1032 or "cancel" text)
+    if (fluxData.ResultCode === "1032" || (fluxData.ResultDesc && fluxData.ResultDesc.toLowerCase().includes('cancel'))) {
+       localRecord.status = 'CANCELLED';
        await redis.set(redisKey, JSON.stringify(localRecord), { EX: 600 });
-       
-       return NextResponse.json({ status: newStatus, reason: localRecord.reason });
+       return NextResponse.json({ status: 'CANCELLED' });
     }
 
-    // --- SCENARIO 3: STILL PENDING ---
+    // Failed Case
+    if (fluxData.TransactionStatus === 'Failed') {
+       localRecord.status = 'FAILED';
+       await redis.set(redisKey, JSON.stringify(localRecord), { EX: 600 });
+       return NextResponse.json({ status: 'FAILED' });
+    }
+
     return NextResponse.json({ status: 'PENDING' });
 
   } catch (error) {
-    console.error("Status Check Error:", error);
     return NextResponse.json({ status: 'PENDING' }); 
   }
 }
