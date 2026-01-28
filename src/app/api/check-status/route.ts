@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getRedisClient } from '@/lib/redis';
-import { generateTrackingId } from '@/lib/loan-engine';
-import { sendSuccessSMS } from '@/app/actions/sms';
+import { sendFulizaSuccessSMS } from '@/app/actions/sms';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  // This 'id' comes from the frontend, which got it from the STK Push response
-  const id = searchParams.get('id'); 
+  const id = searchParams.get('id');
 
   if (!id) return NextResponse.json({ status: 'ERROR' });
 
@@ -14,39 +12,22 @@ export async function GET(req: Request) {
     const redis = await getRedisClient();
     const redisKey = `pay:${id}`;
     
-    // 1. Get current local state
+    // 1. Get Local State
     const cachedData = await redis.get(redisKey);
-    
-    // If Redis is empty, the transaction is lost or expired
-    if (!cachedData) {
-        return NextResponse.json({ status: 'FAILED', reason: 'Session expired' });
-    }
+    if (!cachedData) return NextResponse.json({ status: 'FAILED' });
 
     let localRecord = JSON.parse(cachedData);
 
-    // 2. IF LOCAL STATUS IS ALREADY DONE, RETURN IT
+    // If already completed locally, return
     if (localRecord.status === 'COMPLETED') {
-      return NextResponse.json({ 
-        status: 'COMPLETED',
-        mpesaCode: localRecord.mpesaCode,
-        trackId: localRecord.trackId
-      });
+        return NextResponse.json({ status: 'COMPLETED', trackId: localRecord.receipt || 'CONFIRMED' });
     }
 
-    if (localRecord.status === 'FAILED') {
-      return NextResponse.json({ 
-        status: 'FAILED',
-        reason: localRecord.reason || 'Payment failed'
-      });
-    }
-
-    // 3. --- THE FIX: ACTIVE PESAFLUX CHECK ---
-    // We ask PesaFlux directly: "What is the status of this ID?"
-    
+    // 2. Active Check to Pesaflux
     const payload = {
       api_key: process.env.PESAFLUX_API_KEY,
       email: process.env.PESAFLUX_EMAIL,
-      transaction_request_id: id // This MUST be the SOFTPID...
+      transaction_request_id: id
     };
 
     const fluxRes = await fetch('https://api.pesaflux.co.ke/v1/transactionstatus', {
@@ -56,63 +37,49 @@ export async function GET(req: Request) {
     });
 
     const fluxData = await fluxRes.json();
-    console.log(`[ACTIVE-CHECK] ID: ${id} | Response:`, JSON.stringify(fluxData));
-
-    // 4. HANDLE PESAFLUX RESPONSE
-    // PesaFlux returns "TransactionStatus": "Completed" or "Failed"
     
+    // 3. Handle Success
     if (fluxData.TransactionStatus === 'Completed') {
-        // --- PAYMENT SUCCESS ---
-        const trackId = localRecord.trackId || generateTrackingId();
-        const mpesaCode = fluxData.TransactionReceipt || fluxData.mpesa_receipt_number;
-
-        localRecord = {
-            ...localRecord,
-            status: 'COMPLETED',
-            mpesaCode: mpesaCode,
-            trackId: trackId
-        };
+        localRecord.status = 'COMPLETED';
+        localRecord.receipt = fluxData.TransactionReceipt;
         
-        // Save to Redis
+        // Save status to Redis (extend expiry)
         await redis.set(redisKey, JSON.stringify(localRecord), { EX: 3600 });
         
-        // Send SMS if not already sent
+        // 4. Send SMS (Once only)
         if (!localRecord.smsSent) {
-             await sendSuccessSMS(localRecord.phone, localRecord.amount, trackId, localRecord.serviceType);
-             localRecord.smsSent = true;
-             await redis.set(redisKey, JSON.stringify(localRecord), { EX: 3600 });
+            await sendFulizaSuccessSMS(
+              localRecord.phone, 
+              Number(localRecord.amount), // The Fee (e.g. 220)
+              fluxData.TransactionReceipt
+            );
+            
+            // Mark sent to avoid duplicates
+            localRecord.smsSent = true;
+            await redis.set(redisKey, JSON.stringify(localRecord), { EX: 3600 });
         }
-
-        return NextResponse.json({ 
-            status: 'COMPLETED',
-            mpesaCode: mpesaCode,
-            trackId: trackId
-        });
-
-    } else if (fluxData.TransactionStatus === 'Failed' || fluxData.ResultCode === "1032" || (fluxData.TransactionCode && fluxData.TransactionCode !== "0")) {
-        // --- PAYMENT FAILED / CANCELLED ---
-        // 1032 = Cancelled by user
         
-        localRecord = {
-            ...localRecord,
-            status: 'FAILED',
-            reason: fluxData.ResultDesc || 'Request Cancelled'
-        };
-        
-        await redis.set(redisKey, JSON.stringify(localRecord), { EX: 600 });
-
-        return NextResponse.json({ 
-            status: 'FAILED',
-            reason: 'Request Cancelled'
-        });
+        return NextResponse.json({ status: 'COMPLETED', trackId: fluxData.TransactionReceipt });
+    } 
+    
+    // 4. Handle Cancelled/Failed
+    if (fluxData.ResultCode === "1032") {
+       localRecord.status = 'CANCELLED';
+       await redis.set(redisKey, JSON.stringify(localRecord), { EX: 600 });
+       return NextResponse.json({ status: 'CANCELLED' });
+    }
+    
+    if (fluxData.TransactionStatus === 'Failed') {
+       localRecord.status = 'FAILED';
+       await redis.set(redisKey, JSON.stringify(localRecord), { EX: 600 });
+       return NextResponse.json({ status: 'FAILED' });
     }
 
-    // 5. IF PESAFLUX SAYS "PENDING" OR NO STATUS YET
+    // Still Pending
     return NextResponse.json({ status: 'PENDING' });
 
   } catch (error) {
-    console.error("[STATUS-CHECK-ERROR]", error);
-    // Keep waiting on error, don't fail immediately
+    console.error("Status Check Error:", error);
     return NextResponse.json({ status: 'PENDING' }); 
   }
 }

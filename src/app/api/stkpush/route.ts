@@ -1,68 +1,66 @@
 import { NextResponse } from 'next/server';
 import { getRedisClient } from '@/lib/redis';
-
-// Helper to sanitize phone
-function formatPhoneNumber(phone: string): string {
-  let clean = phone.replace(/\D/g, '');
-  if (clean.startsWith('0')) clean = '254' + clean.substring(1);
-  else if (clean.startsWith('7') || clean.startsWith('1')) clean = '254' + clean;
-  return clean;
-}
+import { formatPhoneForPesaflux } from '@/lib/pesaflux';
 
 export async function POST(req: Request) {
   try {
-    const { phoneNumber, amount, idNumber, serviceType } = await req.json();
+    const { phoneNumber, amount, idNumber } = await req.json();
 
-    if (!phoneNumber || !amount) {
+    if (!phoneNumber || !amount || !idNumber) {
       return NextResponse.json({ success: false, error: "Missing required fields" }, { status: 400 });
     }
 
-    const formattedPhone = formatPhoneNumber(phoneNumber);
-    const cleanAmount = String(Math.ceil(Number(amount))); 
-    const uniqueRef = `${serviceType === 'FULIZA_BOOST' ? 'FZ' : 'LN'}_${idNumber || 'NA'}_${Date.now().toString().slice(-4)}`;
+    let formattedPhone;
+    try {
+      formattedPhone = formatPhoneForPesaflux(phoneNumber);
+    } catch (e) {
+      return NextResponse.json({ success: false, error: "Invalid Safaricom Number" }, { status: 400 });
+    }
+
+    // Unique reference for the transaction
+    const reference = `FZ_${idNumber}_${Date.now().toString().slice(-4)}`;
 
     const payload = {
       api_key: process.env.PESAFLUX_API_KEY,
       email: process.env.PESAFLUX_EMAIL,
-      amount: cleanAmount,
+      amount: String(amount),
       msisdn: formattedPhone,
-      reference: uniqueRef
+      reference: reference
     };
 
-    console.log(`[STK-INIT] Sending to PesaFlux...`);
+    console.log(`[STK-INIT] Sending to PesaFlux: ${formattedPhone} | KES ${amount}`);
 
-    const response = await fetch(`${process.env.PESAFLUX_URL}/initiatestk`, {
+    const response = await fetch('https://api.pesaflux.co.ke/v1/initiatestk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      // Add a timeout to prevent hanging
-      signal: AbortSignal.timeout(15000)
+      signal: AbortSignal.timeout(15000) // 15s Timeout
     });
 
     const data = await response.json();
-    console.log(`[STK-RES] Response:`, data);
 
-    // PesaFlux returns 'transaction_request_id' (e.g. SOFTPID28092024...)
+    // Pesaflux Success Logic
     if (data.success === "200" || data.transaction_request_id) {
-      const trackingId = data.transaction_request_id; // <--- THIS IS CRITICAL
+      const trackingId = data.transaction_request_id;
       
       const redis = await getRedisClient();
       
-      // We use the SOFTPID as the Redis Key
+      // Store initial state in Redis with 1 hour expiry
       await redis.set(`pay:${trackingId}`, JSON.stringify({
         status: 'PENDING',
-        phone: phoneNumber,
-        amount: cleanAmount,
-        serviceType: serviceType,
-        trackId: null,
+        phone: formattedPhone,
+        amount: amount,
+        reference: reference,
         createdAt: Date.now()
       }), { EX: 3600 });
 
-      // Send the SOFTPID to the frontend
       return NextResponse.json({ success: true, checkoutRequestID: trackingId });
     } 
     
-    return NextResponse.json({ success: false, error: data.message || "Gateway Error" });
+    return NextResponse.json({ 
+      success: false, 
+      error: data.message || "Payment Gateway Error" 
+    });
 
   } catch (error: any) {
     console.error('[STK-ERROR]', error);
