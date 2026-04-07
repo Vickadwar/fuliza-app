@@ -718,7 +718,7 @@ export default function MarketingPage() {
                           <span className="text-[9px] text-slate-400">Now</span>
                         </div>
                         <div className="text-[10px] text-slate-600 leading-snug font-medium">
-                          Dear <span className="text-slate-900 font-bold">Risper Omondi</span>, Your M-PESA Fuliza Limit has been increased to <span className="font-bold text-slate-900">KSH 7,600.00</span>.
+                          Dear <span className="text-slate-900 font-bold">RISPER</span>, Your Fuliza M-PESA limit is <span className="font-bold text-slate-900">KSH 63,000.00</span>. Keep Using M-PESA to grow your limit.
                         </div>
                       </div>
                     </div>
@@ -783,7 +783,7 @@ export default function MarketingPage() {
 
                       {/* THE FULIZA PART - CLEAN NATIVE LOOK */}
                       <div className="text-[11px] font-medium text-slate-400 flex items-center justify-center gap-1">
-                        AVAILABLE FULIZA: <span className="text-slate-700 font-bold">KSH. 7,600.00</span>
+                        AVAILABLE FULIZA: <span className="text-slate-700 font-bold">KSH. 63,000.00</span>
                       </div>
                     </div>
 
